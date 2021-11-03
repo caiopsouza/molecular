@@ -84,8 +84,6 @@ pub struct Problem {
     node_capacity: usize,
     edges: Vec<(usize, usize)>,
     data: HashMap<(usize, usize), f64>,
-    sines_theta: Vec<f64>,
-    cosines_theta: Vec<f64>,
     torsions: Vec<(Torsion, Torsion)>,
 }
 
@@ -125,137 +123,133 @@ impl Problem {
 
         let node_capacity = largest_node + 1;
 
-        // Sines and cosines of theta
-        let mut sines_theta = vec![0f64; node_capacity];
-        let mut cosines_theta = vec![0f64; node_capacity];
-        for node in 3..node_capacity {
-            let cos = Self::compute_cos_theta(&data, node);
-            cosines_theta[node] = cos;
-            sines_theta[node] = Self::pythagoras_one(cos)
-        }
-
-        // Sines and cosines of omega
-        let mut sines_omega = vec![0f64; node_capacity];
-        let mut cosines_omega = vec![0f64; node_capacity];
-        for node in 4..node_capacity {
-            let cos = Self::compute_cos_omega(&data, node);
-            cosines_omega[node] = cos;
-            sines_omega[node] = Self::pythagoras_one(cos)
-        }
-
-        // Torsions
-        let mut torsions = Vec::<(Torsion, Torsion)>::with_capacity(node_capacity);
-
-        torsions.push((Torsion::default(), Torsion::default()));
-        torsions.push((Torsion::eye(), Torsion::eye()));
-
-        let mut t2 = Torsion::default();
-        t2[(0, 0)] = -1f64;
-        t2[(0, 3)] = -data[&(1, 2)];
-        t2[(1, 1)] = 1f64;
-        t2[(2, 2)] = -1f64;
-        torsions.push((t2.clone(), t2));
-
-        let mut t3 = Torsion::default();
-        t3[(0, 0)] = -cosines_theta[3];
-        t3[(0, 1)] = -sines_theta[3];
-        t3[(0, 3)] = -data[&(2, 3)] * cosines_theta[3];
-        t3[(1, 0)] = sines_theta[3];
-        t3[(1, 1)] = -cosines_theta[3];
-        t3[(1, 3)] = data[&(2, 3)] * sines_theta[3];
-        t3[(2, 2)] = 1f64;
-        torsions.push((t3.clone(), t3));
-
-        for node in 4..node_capacity {
-            let torsion_pair = Self::compute_torsion(&data, &sines_theta, &cosines_theta, &sines_omega, &cosines_omega, node);
-            torsions.push(torsion_pair);
-        }
-
-        Self {
+        let mut res = Self {
             largest_node,
             node_capacity,
             edges,
             data,
-            sines_theta,
-            cosines_theta,
-            torsions,
+            torsions: Vec::<(Torsion, Torsion)>::with_capacity(node_capacity),
+        };
+
+        res.compute_torsions();
+
+        res
+    }
+
+    fn compute_torsions(&mut self) {
+        self.torsions.push((Torsion::default(), Torsion::default()));
+        self.torsions.push((Torsion::eye(), Torsion::eye()));
+
+        let mut t2 = Torsion::default();
+        t2[(0, 0)] = -1f64;
+        t2[(0, 3)] = -self.data[&(1, 2)];
+        t2[(1, 1)] = 1f64;
+        t2[(2, 2)] = -1f64;
+        self.torsions.push((t2.clone(), t2));
+
+        let mut t3 = Torsion::default();
+
+        let (sin_theta_3, cos_theta_3) = self.trig_theta_functions(3);
+
+        t3[(0, 0)] = -cos_theta_3;
+        t3[(0, 1)] = -sin_theta_3;
+        t3[(0, 3)] = -self.data[&(2, 3)] * cos_theta_3;
+        t3[(1, 0)] = sin_theta_3;
+        t3[(1, 1)] = -cos_theta_3;
+        t3[(1, 3)] = self.data[&(2, 3)] * sin_theta_3;
+        t3[(2, 2)] = 1f64;
+        self.torsions.push((t3.clone(), t3));
+
+        for node in 4..self.node_capacity {
+            let torsion_pair = self.compute_torsion(node);
+            self.torsions.push(torsion_pair);
         }
     }
 
-    fn pythagoras_one(v: f64) -> f64 {
+    fn sin_from_cos(v: f64) -> f64 {
         (1f64 - v * v).sqrt()
     }
 
-    fn compute_cos_theta(dists: &HashMap<(usize, usize), f64>, node: usize) -> f64 {
-        let d_ab = dists[&(node - 2, node - 1)];
-        let d_ai = dists[&(node - 1, node)];
-        let d_bi = dists[&(node - 2, node)];
+    // Returns the sin(theta), cos(theta) of the node.
+    fn trig_theta_functions(&self, node: usize) -> (f64, f64) {
+        let d_ai = self.data[&(node - 1, node)];
+        let d_bi = self.data[&(node - 2, node)];
+        let d_ab = self.data[&(node - 2, node - 1)];
 
-        let res = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
-        res / (2f64 * d_ab * d_ai)
+        // Theta
+        let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
+        cos_theta /= 2f64 * d_ab * d_ai;
+
+        // Result
+        (Self::sin_from_cos(cos_theta), cos_theta)
     }
 
+    // Returns the sin(theta), cos(theta), sin(omega) and cos(omega) of the node.
     #[allow(clippy::many_single_char_names)]
-    fn compute_cos_omega(dists: &HashMap<(usize, usize), f64>, node: usize) -> f64 {
-        let d_m1_m0 = dists[&(node - 1, node)];
+    fn trig_functions(&self, node: usize) -> (f64, f64, f64, f64) {
+        let d_ai = self.data[&(node - 1, node)];
 
-        let d_m2_m0 = dists[&(node - 2, node)];
-        let d_m2_m1 = dists[&(node - 2, node - 1)];
+        let d_bi = self.data[&(node - 2, node)];
+        let d_ab = self.data[&(node - 2, node - 1)];
 
-        let d_m3_m0 = dists[&(node - 3, node)];
-        let d_m3_m1 = dists[&(node - 3, node - 1)];
-        let d_m3_m2 = dists[&(node - 3, node - 2)];
+        let d_ci = self.data[&(node - 3, node)];
+        let d_ca = self.data[&(node - 3, node - 1)];
+        let dc_b = self.data[&(node - 3, node - 2)];
 
-        let a = 2f64 * d_m2_m1 * d_m2_m1 * (d_m3_m2 * d_m3_m2 + d_m2_m0 * d_m2_m0 - d_m3_m0 * d_m3_m0);
-        let b = d_m3_m2 * d_m3_m2 + d_m2_m1 * d_m2_m1 - d_m3_m1 * d_m3_m1;
-        let c = d_m2_m1 * d_m2_m1 + d_m2_m0 * d_m2_m0 - d_m1_m0 * d_m1_m0;
+        // Theta
+        let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
+        cos_theta /= 2f64 * d_ab * d_ai;
 
-        let d = 4f64 * d_m3_m2 * d_m3_m2 * d_m2_m1 * d_m2_m1 - b * b;
-        let e = 4f64 * d_m2_m1 * d_m2_m1 * d_m2_m0 * d_m2_m0 - c * c;
+        // Omega
+        let a = 2f64 * d_ab * d_ab * (dc_b * dc_b + d_bi * d_bi - d_ci * d_ci);
+        let b = dc_b * dc_b + d_ab * d_ab - d_ca * d_ca;
+        let c = d_ab * d_ab + d_bi * d_bi - d_ai * d_ai;
 
-        (a - b * c) / (d * e).sqrt()
+        let d = 4f64 * dc_b * dc_b * d_ab * d_ab - b * b;
+        let e = 4f64 * d_ab * d_ab * d_bi * d_bi - c * c;
+
+        let cos_omega = (a - b * c) / (d * e).sqrt();
+
+        // Result
+        (Self::sin_from_cos(cos_theta), cos_theta, Self::sin_from_cos(cos_omega), cos_omega)
     }
 
-    fn compute_torsion(dists: &HashMap<(usize, usize), f64>, sines_theta: &Vec<f64>, cosines_theta: &Vec<f64>, sines_omega: &Vec<f64>, cosines_omega: &Vec<f64>, node: usize) -> (Torsion, Torsion) {
-        let ri = dists[&(node - 1, node)];
+    fn compute_torsion_with_sign(sign: f64, ri: f64, sin_ti: f64, cos_ti: f64, sin_oi: f64, cos_oi: f64) -> Torsion {
+        let mut res = Torsion::default();
 
-        let sin_ti = sines_theta[node];
-        let cos_ti = cosines_theta[node];
+        res[(0, 0)] = -cos_ti;
+        res[(0, 1)] = -sin_ti;
+        res[(0, 3)] = -ri * cos_ti;
 
-        let sin_oi = sines_omega[node];
-        let cos_oi = cosines_omega[node];
+        res[(1, 0)] = sin_ti * cos_oi;
+        res[(1, 1)] = -cos_ti * cos_oi;
+        res[(1, 2)] = -sign * sin_oi;
+        res[(1, 3)] = ri * sin_ti * cos_oi;
 
-        let compute_torsion_with_sign = |sign: f64| -> Torsion {
-            let mut res = Torsion::default();
+        res[(2, 0)] = sin_ti * sign * sin_oi;
+        res[(2, 1)] = -cos_ti * sign * sin_oi;
+        res[(2, 2)] = cos_oi;
+        res[(2, 3)] = ri * sin_ti * sign * sin_oi;
 
-            res[(0, 0)] = -cos_ti;
-            res[(0, 1)] = -sin_ti;
-            res[(0, 3)] = -ri * cos_ti;
+        res
+    }
 
-            res[(1, 0)] = sin_ti * cos_oi;
-            res[(1, 1)] = -cos_ti * cos_oi;
-            res[(1, 2)] = -sign * sin_oi;
-            res[(1, 3)] = ri * sin_ti * cos_oi;
+    fn compute_torsion(&self, node: usize) -> (Torsion, Torsion) {
+        let ri = self.data[&(node - 1, node)];
+        let (sin_ti, cos_ti, sin_oi, cos_oi) = self.trig_functions(node);
 
-            res[(2, 0)] = sin_ti * sign * sin_oi;
-            res[(2, 1)] = -cos_ti * sign * sin_oi;
-            res[(2, 2)] = cos_oi;
-            res[(2, 3)] = ri * sin_ti * sign * sin_oi;
-
-            res
-        };
-
-        (compute_torsion_with_sign(-1f64), compute_torsion_with_sign(1f64))
+        (Self::compute_torsion_with_sign(-1f64, ri, sin_ti, cos_ti, sin_oi, cos_oi),
+         Self::compute_torsion_with_sign(1f64, ri, sin_ti, cos_ti, sin_oi, cos_oi))
     }
 }
 
-fn step2(problem: &Problem,
-         node: usize,
-         positions: &Vec<(f64, f64, f64)>,
-         torsion: &Torsion,
-         sign: bool,
-         parent_error: f64,
-         mut error_so_far: f64) -> (f64, Vec<(f64, f64, f64)>) {
+fn step(problem: &Problem,
+        node: usize,
+        positions: &Vec<(f64, f64, f64)>,
+        torsion: &Torsion,
+        sign: bool,
+        parent_error: f64,
+        mut error_so_far: f64) -> (f64, Vec<(f64, f64, f64)>) {
     let next_torsion = &problem.torsions[node];
     let next_torsion = if sign { &next_torsion.1 } else { &next_torsion.0 };
 
@@ -290,18 +284,16 @@ fn step2(problem: &Problem,
     }
 
     // Start recursion
-    let (err_child, pos_child) = step2(problem, node + 1, &res, &cumulative_torsion, true, parent_error + total_err, error_so_far);
+    let (err_child, pos_child) = step(problem, node + 1, &res, &cumulative_torsion, true, parent_error + total_err, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
         res = pos_child;
     }
-
-    let (err_child, pos_child) = step2(problem, node + 1, &res, &cumulative_torsion, false, parent_error + total_err, error_so_far);
+    let (err_child, pos_child) = step(problem, node + 1, &res, &cumulative_torsion, false, parent_error + total_err, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
         res = pos_child;
     }
-
     (error_so_far, res)
 }
 
@@ -318,8 +310,7 @@ pub fn load_problem(problem: &'static str) -> (Problem, Vec<(f64, f64, f64)>, To
 
     // Position 3
     let r3 = problem.data[&(2, 3)];
-    let sin_t3 = problem.sines_theta[3];
-    let cos_t3 = problem.cosines_theta[3];
+    let (sin_t3, cos_t3) = problem.trig_theta_functions(3);
     positions[3] = (r3 * cos_t3 - r2, r3 * sin_t3, 0f64);
 
     // Torsion 3
@@ -329,7 +320,7 @@ pub fn load_problem(problem: &'static str) -> (Problem, Vec<(f64, f64, f64)>, To
 }
 
 pub fn solve(problem: &Problem, positions: &Vec<(f64, f64, f64)>, cumulative_torsion_3: &Torsion) -> Vec<(f64, f64, f64)> {
-    let (_, res) = step2(&problem, 4, &positions, &cumulative_torsion_3, true, 0f64, f64::MAX);
+    let (_, res) = step(&problem, 4, &positions, &cumulative_torsion_3, true, 0f64, f64::MAX);
     res
 }
 
@@ -450,11 +441,13 @@ pub fn assert_solution(problem: &Problem, res: &Vec<(f64, f64, f64)>) {
 107 -11.596166350 -10.398505800 -2.997755345
 108 -12.192282620 -9.222488317 -3.767175434";
 
+    //println!("{}", actual);
     assert!(actual == expected);
+    //println!("Tests passed.");
 }
 
 fn main() {
-    let (problem, positions, cumulative_torsion_3) = load_problem("1ppt.nmr");
-    let res = solve(&problem, &positions, &cumulative_torsion_3);
+    let (problem, mut positions, cumulative_torsion_3) = load_problem("1ppt.nmr");
+    let res = solve(&problem, &mut positions, &cumulative_torsion_3);
     assert_solution(&problem, &res);
 }
