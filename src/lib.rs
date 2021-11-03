@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::fs;
 use std::mem::swap;
@@ -19,15 +18,19 @@ impl Torsion {
         res
     }
 
+    fn product_line(&mut self, one: &Self, other: &Self, line: usize) {
+        self[(line, 0)] = one[(line, 0)] * other[(0, 0)] + one[(line, 1)] * other[(1, 0)] + one[(line, 2)] * other[(2, 0)];
+        self[(line, 1)] = one[(line, 0)] * other[(0, 1)] + one[(line, 1)] * other[(1, 1)] + one[(line, 2)] * other[(2, 1)];
+        self[(line, 2)] = one[(line, 0)] * other[(0, 2)] + one[(line, 1)] * other[(1, 2)] + one[(line, 2)] * other[(2, 2)];
+        self[(line, 3)] = one[(line, 0)] * other[(0, 3)] + one[(line, 1)] * other[(1, 3)] + one[(line, 2)] * other[(2, 3)] + one[(line, 3)];
+    }
+
     fn product(&self, other: &Self) -> Self {
         let mut res = Self::default();
 
-        for j in 0..3 {
-            res[(j, 0)] = self[(j, 0)] * other[(0, 0)] + self[(j, 1)] * other[(1, 0)] + self[(j, 2)] * other[(2, 0)];
-            res[(j, 1)] = self[(j, 0)] * other[(0, 1)] + self[(j, 1)] * other[(1, 1)] + self[(j, 2)] * other[(2, 1)];
-            res[(j, 2)] = self[(j, 0)] * other[(0, 2)] + self[(j, 1)] * other[(1, 2)] + self[(j, 2)] * other[(2, 2)];
-            res[(j, 3)] = self[(j, 0)] * other[(0, 3)] + self[(j, 1)] * other[(1, 3)] + self[(j, 2)] * other[(2, 3)] + self[(j, 3)];
-        }
+        res.product_line(self, other, 0);
+        res.product_line(self, other, 1);
+        res.product_line(self, other, 2);
 
         res
     }
@@ -82,43 +85,43 @@ impl IndexMut<(usize, usize)> for Torsion {
 pub struct Problem {
     largest_node: usize,
     node_capacity: usize,
-    edges: Vec<(usize, usize)>,
-    data: HashMap<(usize, usize), f64>,
+    edges: Vec<Vec<usize>>,
+    dists: Vec<f64>,
     torsions: Vec<(Torsion, Torsion)>,
 }
 
 impl Problem {
-    fn from_data(data: &String) -> Self {
-        let raw_data = data;
+    fn parse_line(line: &str) -> (usize, usize, f64) {
+        let mut line = line.split_whitespace();
 
-        let mut data = HashMap::<(usize, usize), f64>::new();
-        let mut edges = Vec::<(usize, usize)>::with_capacity(100);
+        let mut node0 = line.next().unwrap().parse::<usize>().unwrap();
+        let mut node1 = line.next().unwrap().parse::<usize>().unwrap();
+
+        let dist = line.next().unwrap().parse::<f64>().unwrap();
+
+        if node0 > node1 {
+            swap(&mut node0, &mut node1);
+        }
+
+        (node0, node1, dist)
+    }
+
+    fn from_data(data: &str) -> Self {
+        let raw_data = data;
 
         let mut largest_node = 0usize;
 
-        // Populate the data dict and find the largest node
+        // Find the largest node
         for line in raw_data.split('\n') {
             if line.is_empty() {
                 continue;
             }
 
-            let mut line = line.split_whitespace();
-
-            let mut node0 = line.next().unwrap().parse::<usize>().unwrap();
-            let mut node1 = line.next().unwrap().parse::<usize>().unwrap();
-
-            let dist = line.next().unwrap().parse::<f64>().unwrap();
-
-            if node0 > node1 {
-                swap(&mut node0, &mut node1);
-            }
+            let (_, node1, _) = Self::parse_line(line);
 
             if node1 > largest_node {
                 largest_node = node1;
             }
-
-            edges.push((node0, node1));
-            data.insert((node0, node1), dist);
         }
 
         let node_capacity = largest_node + 1;
@@ -126,14 +129,56 @@ impl Problem {
         let mut res = Self {
             largest_node,
             node_capacity,
-            edges,
-            data,
+            edges: vec![Vec::<usize>::with_capacity(10); node_capacity],
+            dists: vec![0f64; node_capacity * node_capacity],
             torsions: Vec::<(Torsion, Torsion)>::with_capacity(node_capacity),
         };
+
+        // Populate the data dict and find the largest node
+        for line in raw_data.split('\n') {
+            if line.is_empty() {
+                continue;
+            }
+
+            let (node0, node1, dist) = Self::parse_line(line);
+
+            res.edges[node1].push(node0);
+            res.set_dist(node0, node1, dist);
+        }
 
         res.compute_torsions();
 
         res
+    }
+
+    fn get_dist(&self, index0: usize, index1: usize) -> f64 {
+        if cfg!(debug_assertions) {
+            self.dists[index0 * self.node_capacity + index1]
+        } else {
+            unsafe {
+                *self.dists.get_unchecked(index0 * self.node_capacity + index1)
+            }
+        }
+    }
+
+    fn set_dist(&mut self, index0: usize, index1: usize, dist: f64) {
+        if cfg!(debug_assertions) {
+            self.dists[index0 * self.node_capacity + index1] = dist;
+        } else {
+            unsafe {
+                *self.dists.get_unchecked_mut(index0 * self.node_capacity + index1) = dist;
+            }
+        }
+    }
+
+    fn get_torsion(&self, index: usize) -> &(Torsion, Torsion) {
+        if cfg!(debug_assertions) {
+            &self.torsions[index]
+        } else {
+            unsafe {
+                self.torsions.get_unchecked(index)
+            }
+        }
     }
 
     fn compute_torsions(&mut self) {
@@ -142,7 +187,7 @@ impl Problem {
 
         let mut t2 = Torsion::default();
         t2[(0, 0)] = -1f64;
-        t2[(0, 3)] = -self.data[&(1, 2)];
+        t2[(0, 3)] = -self.get_dist(1, 2);
         t2[(1, 1)] = 1f64;
         t2[(2, 2)] = -1f64;
         self.torsions.push((t2.clone(), t2));
@@ -153,10 +198,10 @@ impl Problem {
 
         t3[(0, 0)] = -cos_theta_3;
         t3[(0, 1)] = -sin_theta_3;
-        t3[(0, 3)] = -self.data[&(2, 3)] * cos_theta_3;
+        t3[(0, 3)] = -self.get_dist(2, 3) * cos_theta_3;
         t3[(1, 0)] = sin_theta_3;
         t3[(1, 1)] = -cos_theta_3;
-        t3[(1, 3)] = self.data[&(2, 3)] * sin_theta_3;
+        t3[(1, 3)] = self.get_dist(2, 3) * sin_theta_3;
         t3[(2, 2)] = 1f64;
         self.torsions.push((t3.clone(), t3));
 
@@ -172,9 +217,9 @@ impl Problem {
 
     // Returns the sin(theta), cos(theta) of the node.
     fn trig_theta_functions(&self, node: usize) -> (f64, f64) {
-        let d_ai = self.data[&(node - 1, node)];
-        let d_bi = self.data[&(node - 2, node)];
-        let d_ab = self.data[&(node - 2, node - 1)];
+        let d_ai = self.get_dist(node - 1, node);
+        let d_bi = self.get_dist(node - 2, node);
+        let d_ab = self.get_dist(node - 2, node - 1);
 
         // Theta
         let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
@@ -187,14 +232,14 @@ impl Problem {
     // Returns the sin(theta), cos(theta), sin(omega) and cos(omega) of the node.
     #[allow(clippy::many_single_char_names)]
     fn trig_functions(&self, node: usize) -> (f64, f64, f64, f64) {
-        let d_ai = self.data[&(node - 1, node)];
+        let d_ai = self.get_dist(node - 1, node);
 
-        let d_bi = self.data[&(node - 2, node)];
-        let d_ab = self.data[&(node - 2, node - 1)];
+        let d_bi = self.get_dist(node - 2, node);
+        let d_ab = self.get_dist(node - 2, node - 1);
 
-        let d_ci = self.data[&(node - 3, node)];
-        let d_ca = self.data[&(node - 3, node - 1)];
-        let dc_b = self.data[&(node - 3, node - 2)];
+        let d_ci = self.get_dist(node - 3, node);
+        let d_ca = self.get_dist(node - 3, node - 1);
+        let dc_b = self.get_dist(node - 3, node - 2);
 
         // Theta
         let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
@@ -235,7 +280,7 @@ impl Problem {
     }
 
     fn compute_torsion(&self, node: usize) -> (Torsion, Torsion) {
-        let ri = self.data[&(node - 1, node)];
+        let ri = self.get_dist(node - 1, node);
         let (sin_ti, cos_ti, sin_oi, cos_oi) = self.trig_functions(node);
 
         (Self::compute_torsion_with_sign(-1f64, ri, sin_ti, cos_ti, sin_oi, cos_oi),
@@ -245,12 +290,12 @@ impl Problem {
 
 fn step(problem: &Problem,
         node: usize,
-        positions: &Vec<(f64, f64, f64)>,
+        positions: &mut Vec<(f64, f64, f64)>,
         torsion: &Torsion,
         sign: bool,
         parent_error: f64,
-        mut error_so_far: f64) -> (f64, Vec<(f64, f64, f64)>) {
-    let next_torsion = &problem.torsions[node];
+        mut error_so_far: f64) -> (f64, (f64, f64, f64)) {
+    let next_torsion = &problem.get_torsion(node);
     let next_torsion = if sign { &next_torsion.1 } else { &next_torsion.0 };
 
     let cumulative_torsion = torsion.product(next_torsion);
@@ -258,73 +303,70 @@ fn step(problem: &Problem,
     let xi = (cumulative_torsion[(0, 3)], cumulative_torsion[(1, 3)], cumulative_torsion[(2, 3)]);
 
     let mut total_err = 0f64;
-    for &edge in &problem.edges {
-        if edge.1 != node { continue; }
-
-        let neighbor_pos = positions[edge.0];
+    for &neighbor in &problem.edges[node] {
+        let dist = problem.get_dist(neighbor, node);
+        let neighbor_pos = positions[neighbor];
 
         let err = (neighbor_pos.0 - xi.0, neighbor_pos.1 - xi.1, neighbor_pos.2 - xi.2);
         let err = err.0 * err.0 + err.1 * err.1 + err.2 * err.2;
-        let err = err.sqrt() - problem.data[&edge];
+        let err = err.sqrt() - dist;
 
-        total_err += err.abs() / problem.data[&edge];
+        total_err += err.abs() / dist;
     }
-
-    let mut res = positions.clone();
-    res[node] = xi;
 
     // End the recursion if error is bigger than error so far, pruning the branches
     if parent_error + total_err > error_so_far {
-        return (parent_error + total_err, res);
+        return (parent_error + total_err, xi);
     }
+
+    positions[node] = xi;
 
     // End the recursion if it's the last node
     if node >= problem.largest_node {
-        return (parent_error + total_err, res);
+        return (parent_error + total_err, xi);
     }
 
     // Start recursion
-    let (err_child, pos_child) = step(problem, node + 1, &res, &cumulative_torsion, true, parent_error + total_err, error_so_far);
+    let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, true, parent_error + total_err, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
-        res = pos_child;
+        positions[node + 1] = pos_child;
     }
-    let (err_child, pos_child) = step(problem, node + 1, &res, &cumulative_torsion, false, parent_error + total_err, error_so_far);
+    let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, false, parent_error + total_err, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
-        res = pos_child;
+        positions[node + 1] = pos_child;
     }
-    (error_so_far, res)
+    (error_so_far, xi)
 }
 
-pub fn load_problem(problem: &'static str) -> (Problem, Vec<(f64, f64, f64)>, Torsion) {
+pub fn load_problem(problem: &'static str) -> Problem {
     let problem = "C:/repos/molecular/src/data/".to_owned() + problem;
     let problem = fs::read_to_string(problem).unwrap();
-    let problem = Problem::from_data(&problem);
+    Problem::from_data(&problem)
+}
 
+pub fn solve(problem: &Problem) -> Vec<(f64, f64, f64)> {
     let mut positions = vec![(0f64, 0f64, 0f64); problem.node_capacity];
 
     // Position 2
-    let r2 = problem.data[&(1, 2)];
+    let r2 = problem.get_dist(1, 2);
     positions[2].0 = -r2;
 
     // Position 3
-    let r3 = problem.data[&(2, 3)];
+    let r3 = problem.get_dist(2, 3);
     let (sin_t3, cos_t3) = problem.trig_theta_functions(3);
     positions[3] = (r3 * cos_t3 - r2, r3 * sin_t3, 0f64);
 
     // Torsion 3
-    let cumulative_torsion_3 = problem.torsions[2].0.product(&problem.torsions[3].0);
+    let cumulative_torsion_3 = problem.get_torsion(2).0.product(&problem.get_torsion(3).0);
 
-    (problem, positions, cumulative_torsion_3)
+    step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, f64::MAX);
+
+    positions
 }
 
-pub fn solve(problem: &Problem, positions: &Vec<(f64, f64, f64)>, cumulative_torsion_3: &Torsion) -> Vec<(f64, f64, f64)> {
-    let (_, res) = step(&problem, 4, &positions, &cumulative_torsion_3, true, 0f64, f64::MAX);
-    res
-}
-
-pub fn assert_solution(problem: &Problem, res: &Vec<(f64, f64, f64)>) {
+pub fn assert_solution(problem: &Problem, res: &[(f64, f64, f64)]) {
     let mut res_array = Vec::<String>::with_capacity(problem.node_capacity);
     for node in 1..problem.node_capacity {
         res_array.push(format!("{} {:.9} {:.9} {:.9}", node, res[node].0, res[node].1, res[node].2));
@@ -447,7 +489,7 @@ pub fn assert_solution(problem: &Problem, res: &Vec<(f64, f64, f64)>) {
 }
 
 fn main() {
-    let (problem, mut positions, cumulative_torsion_3) = load_problem("1ppt.nmr");
-    let res = solve(&problem, &mut positions, &cumulative_torsion_3);
-    assert_solution(&problem, &res);
+    let problem = load_problem("2erl.nmr");
+    let positions = solve(&problem);
+    assert_solution(&problem, &positions);
 }
