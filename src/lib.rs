@@ -217,9 +217,9 @@ impl Problem {
 
     // Returns the sin(theta), cos(theta) of the node.
     fn trig_theta_functions(&self, node: usize) -> (f64, f64) {
-        let d_ai = self.get_dist(node - 1, node);
-        let d_bi = self.get_dist(node - 2, node);
         let d_ab = self.get_dist(node - 2, node - 1);
+        let d_bi = self.get_dist(node - 2, node);
+        let d_ai = self.get_dist(node - 1, node);
 
         // Theta
         let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
@@ -232,26 +232,33 @@ impl Problem {
     // Returns the sin(theta), cos(theta), sin(omega) and cos(omega) of the node.
     #[allow(clippy::many_single_char_names)]
     fn trig_functions(&self, node: usize) -> (f64, f64, f64, f64) {
+        let d_cb = self.get_dist(node - 3, node - 2);
+        let d_ca = self.get_dist(node - 3, node - 1);
+        let d_ci = self.get_dist(node - 3, node);
+
+        let d_ab = self.get_dist(node - 2, node - 1);
+        let d_bi = self.get_dist(node - 2, node);
+
         let d_ai = self.get_dist(node - 1, node);
 
-        let d_bi = self.get_dist(node - 2, node);
-        let d_ab = self.get_dist(node - 2, node - 1);
-
-        let d_ci = self.get_dist(node - 3, node);
-        let d_ca = self.get_dist(node - 3, node - 1);
-        let dc_b = self.get_dist(node - 3, node - 2);
+        let d_ab_squared = d_ab * d_ab;
+        let d_ai_squared = d_ai * d_ai;
+        let d_bi_squared = d_bi * d_bi;
+        let d_ca_squared = d_ca * d_ca;
+        let d_cb_squared = d_cb * d_cb;
+        let d_ci_squared = d_ci * d_ci;
 
         // Theta
-        let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
+        let mut cos_theta = d_ab_squared + d_ai_squared - d_bi_squared;
         cos_theta /= 2f64 * d_ab * d_ai;
 
         // Omega
-        let a = 2f64 * d_ab * d_ab * (dc_b * dc_b + d_bi * d_bi - d_ci * d_ci);
-        let b = dc_b * dc_b + d_ab * d_ab - d_ca * d_ca;
-        let c = d_ab * d_ab + d_bi * d_bi - d_ai * d_ai;
+        let a = 2f64 * d_ab_squared * (d_cb_squared + d_bi_squared - d_ci_squared);
+        let b = d_cb_squared + d_ab_squared - d_ca_squared;
+        let c = d_ab_squared + d_bi_squared - d_ai_squared;
 
-        let d = 4f64 * dc_b * dc_b * d_ab * d_ab - b * b;
-        let e = 4f64 * d_ab * d_ab * d_bi * d_bi - c * c;
+        let d = 4f64 * d_cb_squared * d_ab_squared - b * b;
+        let e = 4f64 * d_ab_squared * d_bi_squared - c * c;
 
         let cos_omega = (a - b * c) / (d * e).sqrt();
 
@@ -259,7 +266,10 @@ impl Problem {
         (Self::sin_from_cos(cos_theta), cos_theta, Self::sin_from_cos(cos_omega), cos_omega)
     }
 
-    fn compute_torsion_with_sign(sign: f64, ri: f64, sin_ti: f64, cos_ti: f64, sin_oi: f64, cos_oi: f64) -> Torsion {
+    fn compute_torsion(&self, node: usize) -> (Torsion, Torsion) {
+        let ri = self.get_dist(node - 1, node);
+        let (sin_ti, cos_ti, sin_oi, cos_oi) = self.trig_functions(node);
+
         let mut res = Torsion::default();
 
         res[(0, 0)] = -cos_ti;
@@ -268,23 +278,21 @@ impl Problem {
 
         res[(1, 0)] = sin_ti * cos_oi;
         res[(1, 1)] = -cos_ti * cos_oi;
-        res[(1, 2)] = -sign * sin_oi;
+        res[(1, 2)] = -sin_oi;
         res[(1, 3)] = ri * sin_ti * cos_oi;
 
-        res[(2, 0)] = sin_ti * sign * sin_oi;
-        res[(2, 1)] = -cos_ti * sign * sin_oi;
+        res[(2, 0)] = sin_ti * sin_oi;
+        res[(2, 1)] = -cos_ti * sin_oi;
         res[(2, 2)] = cos_oi;
-        res[(2, 3)] = ri * sin_ti * sign * sin_oi;
+        res[(2, 3)] = ri * sin_ti * sin_oi;
 
-        res
-    }
+        let mut res_neg = res.clone();
+        res_neg[(1, 2)] *= -1f64;
+        res_neg[(2, 0)] *= -1f64;
+        res_neg[(2, 1)] *= -1f64;
+        res_neg[(2, 3)] *= -1f64;
 
-    fn compute_torsion(&self, node: usize) -> (Torsion, Torsion) {
-        let ri = self.get_dist(node - 1, node);
-        let (sin_ti, cos_ti, sin_oi, cos_oi) = self.trig_functions(node);
-
-        (Self::compute_torsion_with_sign(-1f64, ri, sin_ti, cos_ti, sin_oi, cos_oi),
-         Self::compute_torsion_with_sign(1f64, ri, sin_ti, cos_ti, sin_oi, cos_oi))
+        (res_neg, res)
     }
 }
 
@@ -295,36 +303,36 @@ fn step(problem: &Problem,
         sign: bool,
         parent_error: f64,
         mut error_so_far: f64) -> (f64, (f64, f64, f64)) {
-    let next_torsion = &problem.get_torsion(node);
+    let next_torsion = problem.get_torsion(node);
     let next_torsion = if sign { &next_torsion.1 } else { &next_torsion.0 };
 
     let cumulative_torsion = torsion.product(next_torsion);
 
-    let xi = (cumulative_torsion[(0, 3)], cumulative_torsion[(1, 3)], cumulative_torsion[(2, 3)]);
+    let pos = (cumulative_torsion[(0, 3)], cumulative_torsion[(1, 3)], cumulative_torsion[(2, 3)]);
 
     let mut total_err = 0f64;
     for &neighbor in &problem.edges[node] {
         let dist = problem.get_dist(neighbor, node);
-        let neighbor_pos = positions[neighbor];
+        let neighbor = positions[neighbor];
 
-        let err = (neighbor_pos.0 - xi.0, neighbor_pos.1 - xi.1, neighbor_pos.2 - xi.2);
+        let err = (neighbor.0 - pos.0, neighbor.1 - pos.1, neighbor.2 - pos.2);
         let err = err.0 * err.0 + err.1 * err.1 + err.2 * err.2;
-        let err = err.sqrt() - dist;
+        let err = err - dist * dist;
 
-        total_err += err.abs() / dist;
+        total_err += err.abs();
     }
 
-    // End the recursion if error is bigger than error so far, pruning the branches
+    // End the recursion if the error is bigger than the error so far
     if parent_error + total_err > error_so_far {
-        return (parent_error + total_err, xi);
+        return (parent_error + total_err, pos);
     }
-
-    positions[node] = xi;
 
     // End the recursion if it's the last node
     if node >= problem.largest_node {
-        return (parent_error + total_err, xi);
+        return (parent_error + total_err, pos);
     }
+
+    positions[node] = pos;
 
     // Start recursion
     let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, true, parent_error + total_err, error_so_far);
@@ -332,12 +340,14 @@ fn step(problem: &Problem,
         error_so_far = err_child;
         positions[node + 1] = pos_child;
     }
+
     let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, false, parent_error + total_err, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
         positions[node + 1] = pos_child;
     }
-    (error_so_far, xi)
+
+    (error_so_far, pos)
 }
 
 pub fn load_problem(problem: &'static str) -> Problem {
@@ -489,7 +499,7 @@ pub fn assert_solution(problem: &Problem, res: &[(f64, f64, f64)]) {
 }
 
 fn main() {
-    let problem = load_problem("2erl.nmr");
+    let problem = load_problem("1ppt.nmr");
     let positions = solve(&problem);
     assert_solution(&problem, &positions);
 }
