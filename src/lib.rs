@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Formatter};
-use std::fs;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use std::ops::{Index, IndexMut};
 
@@ -91,37 +92,34 @@ pub struct Problem {
 }
 
 impl Problem {
-    fn parse_line(line: &str) -> (usize, usize, f64) {
-        let mut line = line.split_whitespace();
+    fn from_file(file: &str) -> Self {
+        let mut data = Vec::<(usize, usize, f64)>::with_capacity(1000);
 
-        let mut node0 = line.next().unwrap().parse::<usize>().unwrap();
-        let mut node1 = line.next().unwrap().parse::<usize>().unwrap();
-
-        let dist = line.next().unwrap().parse::<f64>().unwrap();
-
-        if node0 > node1 {
-            swap(&mut node0, &mut node1);
-        }
-
-        (node0, node1, dist)
-    }
-
-    fn from_data(data: &str) -> Self {
-        let raw_data = data;
+        let file = File::open(file).unwrap();
+        let mut reader = BufReader::new(file);
+        let mut line = String::with_capacity(200);
 
         let mut largest_node = 0usize;
 
         // Find the largest node
-        for line in raw_data.split('\n') {
-            if line.is_empty() {
-                continue;
-            }
+        while reader.read_line(&mut line).unwrap() > 0 {
+            let mut line_split = line.split_whitespace();
 
-            let (_, node1, _) = Self::parse_line(line);
+            let mut node0 = line_split.next().unwrap().parse::<usize>().unwrap();
+            let mut node1 = line_split.next().unwrap().parse::<usize>().unwrap();
+            let dist = line_split.next().unwrap().parse::<f64>().unwrap();
+
+            if node0 > node1 {
+                swap(&mut node0, &mut node1);
+            }
 
             if node1 > largest_node {
                 largest_node = node1;
             }
+
+            data.push((node0, node1, dist));
+
+            line.clear();
         }
 
         let node_capacity = largest_node + 1;
@@ -129,19 +127,13 @@ impl Problem {
         let mut res = Self {
             largest_node,
             node_capacity,
-            edges: vec![Vec::<usize>::with_capacity(10); node_capacity],
+            edges: vec![Vec::<usize>::with_capacity(20); node_capacity],
             dists: vec![0f64; node_capacity * node_capacity],
             torsions: Vec::<(Torsion, Torsion)>::with_capacity(node_capacity),
         };
 
-        // Populate the data dict and find the largest node
-        for line in raw_data.split('\n') {
-            if line.is_empty() {
-                continue;
-            }
-
-            let (node0, node1, dist) = Self::parse_line(line);
-
+        // Populate the data dict
+        for (node0, node1, dist) in data {
             res.edges[node1].push(node0);
             res.set_dist(node0, node1, dist);
         }
@@ -352,8 +344,7 @@ fn step(problem: &Problem,
 
 pub fn load_problem(problem: &'static str) -> Problem {
     let problem = "C:/repos/molecular/src/data/".to_owned() + problem;
-    let problem = fs::read_to_string(problem).unwrap();
-    Problem::from_data(&problem)
+    Problem::from_file(&problem)
 }
 
 pub fn solve(problem: &Problem) -> Vec<(f64, f64, f64)> {
