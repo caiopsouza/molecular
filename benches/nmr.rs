@@ -12,14 +12,19 @@ fn criterion_benchmark(c: &mut Criterion) {
     }));
 
     c.bench_function("1ppt.nmr", |b| b.iter(|| {
-        let problem = molecular::load_problem("1ppt.nmr");
-        let positions = molecular::solve(black_box(&problem));
-        molecular::assert_solution(&problem, &positions);
+        molecular::run(molecular::solve_1ppt);
     }));
 
     c.bench_function("2erl.nmr", |b| b.iter(|| {
-        let problem = molecular::load_problem("2erl.nmr");
-        molecular::solve(black_box(&problem));
+        molecular::run(molecular::solve_2erl);
+    }));
+
+    c.bench_function("1fs3.nmr", |b| b.iter(|| {
+        molecular::run(molecular::solve_1fs3);
+    }));
+
+    c.bench_function("2e7z.nmr", |b| b.iter(|| {
+        molecular::run(molecular::solve_2e7z);
     }));
 }
 
