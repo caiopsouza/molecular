@@ -1,14 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("test.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("test.nmr"));
-    }));
-
-    c.bench_function("10-3.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("10-3.nmr"));
-    }));
-
     c.bench_function("1ppt.nmr", |b| b.iter(|| {
         molecular::load_solve_and_format(black_box("1ppt.nmr"));
     }));
@@ -21,12 +13,24 @@ fn criterion_benchmark(c: &mut Criterion) {
         molecular::load_solve_and_format(black_box("1fs3.nmr"));
     }));
 
-    c.bench_function("2e7z.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("2e7z.nmr"));
+    c.bench_function("1mqq.nmr", |b| b.iter(|| {
+        molecular::load_solve_and_format(black_box("1mqq.nmr"));
     }));
 
-    c.bench_function("7nyz.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("7nyz.nmr"));
+    c.bench_function("1m40.nmr", |b| b.iter(|| {
+        molecular::load_solve_and_format(black_box("1m40.nmr"));
+    }));
+
+    c.bench_function("1rwh.nmr", |b| b.iter(|| {
+        molecular::load_solve_and_format(black_box("1rwh.nmr"));
+    }));
+
+    c.bench_function("3b34.nmr", |b| b.iter(|| {
+        molecular::load_solve_and_format(black_box("3b34.nmr"));
+    }));
+
+    c.bench_function("2e7z.nmr", |b| b.iter(|| {
+        molecular::load_solve_and_format(black_box("2e7z.nmr"));
     }));
 }
 
