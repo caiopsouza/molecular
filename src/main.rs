@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use std::ops::{Index, IndexMut};
 
+type VecPos = Vec<(f64, f64, f64)>;
+
 #[derive(Default, Clone)]
 pub struct Torsion([f64; 12]);
 
@@ -293,7 +295,7 @@ impl Problem {
     }
 }
 
-fn compute_position_and_error(problem: &Problem, node: usize, positions: &mut Vec<(f64, f64, f64)>, torsion: &Torsion, sign: bool) -> ((f64, f64, f64), Torsion, f64) {
+fn compute_position_and_error(problem: &Problem, node: usize, positions: &mut VecPos, torsion: &Torsion, sign: bool) -> ((f64, f64, f64), Torsion, f64) {
     let next_torsion = problem.get_torsion(node);
     let next_torsion = if sign { &next_torsion.1 } else { &next_torsion.0 };
 
@@ -318,7 +320,7 @@ fn compute_position_and_error(problem: &Problem, node: usize, positions: &mut Ve
 
 fn step(problem: &Problem,
         node: usize,
-        positions: &mut Vec<(f64, f64, f64)>,
+        positions: &mut VecPos,
         torsion: &Torsion,
         sign: bool,
         parent_error: f64,
@@ -358,10 +360,10 @@ pub fn load_problem(problem: &'static str) -> Problem {
     Problem::from_file(&problem)
 }
 
-pub fn solve(problem: &Problem) -> Vec<(f64, f64, f64)> {
+pub fn solve_first_three(problem: &Problem) -> (Torsion, VecPos) {
     let mut positions = vec![(0f64, 0f64, 0f64); problem.node_capacity];
 
-    // Position 2
+    // Position 2 (position 1 is all zeros)
     let r2 = problem.get_dist(1, 2);
     positions[2].0 = -r2;
 
@@ -373,25 +375,34 @@ pub fn solve(problem: &Problem) -> Vec<(f64, f64, f64)> {
     // Torsion 3
     let cumulative_torsion_3 = problem.get_torsion(2).0.product(&problem.get_torsion(3).0);
 
-    step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, 1e-7 * problem.edge_count as f64);
+    //step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, 1e-7 * problem.edge_count as f64);
 
+    (cumulative_torsion_3, positions)
+}
+
+pub fn solve(problem: &Problem) -> VecPos {
+    let (cumulative_torsion_3, mut positions) = solve_first_three(problem);
+    step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, 1e-7 * problem.edge_count as f64);
     positions
+}
+
+pub fn format(problem: &Problem, positions: &VecPos) -> String {
+    let mut res = Vec::<String>::with_capacity(problem.node_capacity);
+    for node in 1..problem.node_capacity {
+        res.push(format!("{} {:.9} {:.9} {:.9}", node, positions[node].0, positions[node].1, positions[node].2));
+    }
+    res.join("\n")
 }
 
 pub fn load_solve_and_format(problem: &'static str) -> String {
     let problem = load_problem(problem);
     let positions = solve(&problem);
-
-    let mut actual = Vec::<String>::with_capacity(problem.node_capacity);
-    for node in 1..problem.node_capacity {
-        actual.push(format!("{} {:.9} {:.9} {:.9}", node, positions[node].0, positions[node].1, positions[node].2));
-    }
-    actual.join("\n")
+    format(&problem, &positions)
 }
 
 fn main() {
-    let actual = load_solve_and_format("5qdl.nmr");
-    println!("{}", actual);
+    let problem = load_problem("7nyz.nmr");
+    println!("{:#?}", problem);
 }
 
 #[cfg(test)]
