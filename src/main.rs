@@ -145,10 +145,8 @@ impl Problem {
     fn get_dist(&self, index0: usize, index1: usize) -> f64 {
         let dist = self.dists[index0 * self.node_capacity + index1];
 
-        if cfg!(debug_assertions) {
-            if dist.abs() < 1e-10 {
-                panic!("dist between {} and {} is too close to zero", index0, index1);
-            }
+        if cfg!(debug_assertions) && dist.abs() < 1e-10 {
+            panic!("dist between {} and {} is too close to zero", index0, index1);
         }
 
         dist
@@ -273,17 +271,6 @@ impl Problem {
         res_neg[(2, 1)] *= -1f64;
         res_neg[(2, 3)] *= -1f64;
 
-        /*if res_neg[(0, 1)].is_nan() || res[(0, 1)].is_nan() {
-            println!("{}", node);
-
-            println!("{}", self.get_dist(node - 2, node - 1));
-            println!("{}", self.get_dist(node - 1, node));
-
-            println!("{:#?}", res_neg);
-            println!("{:#?}", res);
-            panic!();
-        }*/
-
         (res_neg, res)
     }
 }
@@ -295,13 +282,6 @@ fn compute_position_and_error(problem: &Problem, node: usize, positions: &RangeP
     let cumulative_torsion = torsion.product(next_torsion);
 
     let pos = (cumulative_torsion[(0, 3)], cumulative_torsion[(1, 3)], cumulative_torsion[(2, 3)]);
-
-    /*if pos.0.is_nan() {
-        println!("{} {}", node, sign);
-        println!("{:#?}", torsion);
-        println!("{:#?}", next_torsion);
-        panic!("-----------");
-    }*/
 
     let mut total_err = 0f64;
     for &neighbor in &problem.edges[node] {
@@ -356,7 +336,7 @@ fn step(problem: &Problem,
 }
 
 pub fn load_problem(problem: &'static str) -> Problem {
-    let problem = "/home/caio/molecular/src/data/".to_owned() + problem;
+    let problem = "/home/caio/molecular/src/data_rem/".to_owned() + problem;
     Problem::from_file(&problem)
 }
 
@@ -396,6 +376,18 @@ pub fn heuristics_greedy(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
 
     for node in 4..problem.node_capacity {
         let (pos_true, cumulative_torsion_true, err_true) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, true);
+
+        // If the error is acceptable, no need to calculate the other.
+        // This will usually happen when there's no extra information about the edges and the error will be zero.
+        // Tn that case, calculating the alternative will also result in zero.
+        if err_true < 1e-20 {
+            cumulative_torsion = cumulative_torsion_true;
+            total_err += err_true;
+            positions[node] = pos_true;
+            solution[node] = true;
+            continue;
+        }
+
         let (pos_false, cumulative_torsion_false, err_false) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, false);
 
         let (pos_best, err_best, sol_best) =
@@ -424,7 +416,7 @@ pub fn heuristic_local_search(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
 }
 
 pub fn solve_heuristic_error(problem: &Problem) -> (f64, VecPos) {
-    let (err, _, _) = heuristic_local_search(&problem);
+    let (err, _, _) = heuristic_local_search(problem);
     solve(problem, err)
 }
 
@@ -438,11 +430,13 @@ pub fn format(problem: &Problem, positions: &RangePos) -> String {
 
 pub fn load_solve_and_format(problem: &'static str) -> String {
     let problem = load_problem(problem);
-    let (_, _, positions) = heuristic_local_search(&problem);
+    let (err, positions) = solve_default_error(&problem);
+    println!("error={:e}", err / problem.edge_count as f64);
     format(&problem, &positions)
 }
 
+#[allow(dead_code)]
 fn main() {
-    let actual = load_solve_and_format("2e7z.nmr");
+    let actual = load_solve_and_format("1fs3.nmr");
     println!("{}", actual);
 }
