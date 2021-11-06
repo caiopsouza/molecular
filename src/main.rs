@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader};
 use std::mem::swap;
 use std::ops::{Index, IndexMut};
 
+type RangePos = [(f64, f64, f64)];
+
 type VecPos = Vec<(f64, f64, f64)>;
 
 #[derive(Default, Clone)]
@@ -98,7 +100,7 @@ impl Problem {
     fn from_file(file: &str) -> Self {
         let mut data = Vec::<(usize, usize, f64)>::with_capacity(1000);
 
-        let file = File::open(file).expect(&format!("file: {}", file));
+        let file = File::open(file).unwrap_or_else(|_| panic!("file: {}", file));
         let mut reader = BufReader::new(file);
         let mut line = String::with_capacity(200);
 
@@ -375,8 +377,6 @@ pub fn solve_first_three(problem: &Problem) -> (Torsion, VecPos) {
     // Torsion 3
     let cumulative_torsion_3 = problem.get_torsion(2).0.product(&problem.get_torsion(3).0);
 
-    //step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, 1e-7 * problem.edge_count as f64);
-
     (cumulative_torsion_3, positions)
 }
 
@@ -386,10 +386,10 @@ pub fn solve(problem: &Problem) -> VecPos {
     positions
 }
 
-pub fn format(problem: &Problem, positions: &VecPos) -> String {
+pub fn format(problem: &Problem, positions: &RangePos) -> String {
     let mut res = Vec::<String>::with_capacity(problem.node_capacity);
-    for node in 1..problem.node_capacity {
-        res.push(format!("{} {:.9} {:.9} {:.9}", node, positions[node].0, positions[node].1, positions[node].2));
+    for (node, position) in positions.iter().enumerate().take(problem.node_capacity).skip(1) {
+        res.push(format!("{} {:.9} {:.9} {:.9}", node, position.0, position.1, position.2));
     }
     res.join("\n")
 }
