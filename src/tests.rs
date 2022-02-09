@@ -1,10 +1,18 @@
 #[cfg(test)]
-mod tests {
-    use crate::load_solve_and_format;
+mod actual_solution {
+    use crate::problem::Problem;
+    use crate::solve_default_error;
+
+    pub fn load_solve_and_format_test(problem: &str) -> String {
+        let problem = "/home/caio/molecular/src/instances/".to_owned() + problem + ".nmr";
+        let problem = Problem::from_file(&problem);
+        let (_, positions) = solve_default_error(&problem);
+        format!("{}", positions)
+    }
 
     #[test]
     fn instance_1ppt() {
-        let actual = load_solve_and_format("1ppt.nmr");
+        let actual = load_solve_and_format_test("1ppt");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.435771918 0.000000000 0.000000000
@@ -113,14 +121,15 @@ mod tests {
 105 -9.717934880 -9.210047272 -2.048789132
 106 -10.092857243 -10.116087223 -2.806759336
 107 -11.596166350 -10.398505800 -2.997755345
-108 -12.192282620 -9.222488317 -3.767175434";
+108 -12.192282620 -9.222488317 -3.767175434
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_2erl() {
-        let actual = load_solve_and_format("2erl.nmr");
+        let actual = load_solve_and_format_test("2erl");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.439921178 0.000000000 0.000000000
@@ -241,14 +250,15 @@ mod tests {
 117 6.339669238 20.063587681 10.181386611
 118 6.816748130 20.164232404 8.956808164
 119 8.216380992 20.282636770 8.548723299
-120 8.513250714 21.613516386 7.895823752";
+120 8.513250714 21.613516386 7.895823752
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_1fs3() {
-        let actual = load_solve_and_format("1fs3.nmr");
+        let actual = load_solve_and_format_test("1fs3");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.490876923 0.000000000 0.000000000
@@ -621,14 +631,15 @@ mod tests {
 369 -28.592057022 10.479959464 -1.143885866
 370 -29.004574642 11.699295648 -0.814015462
 371 -30.409266047 11.998004244 -0.593790053
-372 -30.752936938 13.277521343 -1.341389084";
+372 -30.752936938 13.277521343 -1.341389084
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_1mqq() {
-        let actual = load_solve_and_format("1mqq.nmr");
+        let actual = load_solve_and_format_test("1mqq");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.452705751 0.000000000 0.000000000
@@ -2661,14 +2672,15 @@ mod tests {
 2029 -32.509913280 29.497446179 17.940578705
 2030 -32.479216080 28.256977485 17.470051234
 2031 -33.589556559 27.362766188 17.870373824
-2032 -34.880977067 27.809337834 17.205062742";
+2032 -34.880977067 27.809337834 17.205062742
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_1m40() {
-        let actual = load_solve_and_format("1m40.nmr");
+        let actual = load_solve_and_format_test("1m40");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -0.641739823 0.000000000 0.000000000
@@ -3893,14 +3905,15 @@ mod tests {
 1221 0.351399418 -3.588557003 -6.288725394
 1222 0.547954152 -3.793975610 -6.252844579
 1223 1.695292955 -4.153223161 -5.851571769
-1224 1.949981840 -4.361277844 -6.059638636";
+1224 1.949981840 -4.361277844 -6.059638636
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_1rwh() {
-        let actual = load_solve_and_format("1rwh.nmr");
+        let actual = load_solve_and_format_test("1rwh");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.489945301 0.000000000 0.000000000
@@ -6166,14 +6179,15 @@ mod tests {
 2262 8.566965506 -53.718693344 36.765811299
 2263 7.890164150 -54.772537748 37.235242758
 2264 8.259059572 -55.523952376 38.425791046
-2265 9.731329728 -55.946502933 38.273894318";
+2265 9.731329728 -55.946502933 38.273894318
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_3b34() {
-        let actual = load_solve_and_format("3b34.nmr");
+        let actual = load_solve_and_format_test("3b34");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.462177144 0.000000000 0.000000000
@@ -8964,14 +8978,15 @@ mod tests {
 2787 2.526289663 5.825448313 15.134114229
 2788 1.464250083 6.404174349 14.579072694
 2789 1.430821849 7.827526032 14.238789663
-2790 1.507305058 8.722327705 15.480775688";
+2790 1.507305058 8.722327705 15.480775688
+";
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn instance_2e7z() {
-        let actual = load_solve_and_format("2e7z.nmr");
+        let actual = load_solve_and_format_test("2e7z");
 
         let expected = "1 0.000000000 0.000000000 0.000000000
 2 -1.505423861 0.000000000 0.000000000
@@ -11879,7 +11894,8 @@ mod tests {
 2904 -39.407578525 -13.317181709 -32.651429909
 2905 -38.073993312 -13.332620395 -32.608978451
 2906 -37.233558911 -12.821394546 -33.685507665
-2907 -37.327650684 -13.689569441 -34.942780941";
+2907 -37.327650684 -13.689569441 -34.942780941
+";
 
         assert_eq!(actual, expected);
     }

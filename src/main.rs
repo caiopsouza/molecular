@@ -1,281 +1,16 @@
-mod checks;
+mod tests;
+mod torsion;
+mod problem;
+mod solution;
 
-use std::fmt::{Debug, Formatter};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::mem::swap;
-use std::ops::{Index, IndexMut};
+use std::cmp::Ordering;
+use rand::prelude::StdRng;
+use rand::{Rng, SeedableRng};
+use crate::problem::Problem;
+use crate::solution::{Pos, VecPos};
+use crate::torsion::Torsion;
 
-type RangePos = [(f64, f64, f64)];
-
-type VecPos = Vec<(f64, f64, f64)>;
-
-#[derive(Default, Clone)]
-pub struct Torsion([f64; 12]);
-
-impl Torsion {
-    // Assumes the rest of the matrix is already zeroed.
-    fn eye() -> Self {
-        let mut res = Self::default();
-
-        res[(0, 0)] = 1f64;
-        res[(1, 1)] = 1f64;
-        res[(2, 2)] = 1f64;
-
-        res
-    }
-
-    fn product_line(&mut self, one: &Self, other: &Self, line: usize) {
-        self[(line, 0)] = one[(line, 0)] * other[(0, 0)] + one[(line, 1)] * other[(1, 0)] + one[(line, 2)] * other[(2, 0)];
-        self[(line, 1)] = one[(line, 0)] * other[(0, 1)] + one[(line, 1)] * other[(1, 1)] + one[(line, 2)] * other[(2, 1)];
-        self[(line, 2)] = one[(line, 0)] * other[(0, 2)] + one[(line, 1)] * other[(1, 2)] + one[(line, 2)] * other[(2, 2)];
-        self[(line, 3)] = one[(line, 0)] * other[(0, 3)] + one[(line, 1)] * other[(1, 3)] + one[(line, 2)] * other[(2, 3)] + one[(line, 3)];
-    }
-
-    fn product(&self, other: &Self) -> Self {
-        let mut res = Self::default();
-
-        res.product_line(self, other, 0);
-        res.product_line(self, other, 1);
-        res.product_line(self, other, 2);
-
-        res
-    }
-}
-
-impl Debug for Torsion {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[[{}, {}, {}, {}]\n [{}, {}, {}, {}]\n [{}, {}, {}, {}]\n [0, 0, 0, 1]]",
-               self[(0, 0)],
-               self[(0, 1)],
-               self[(0, 2)],
-               self[(0, 3)],
-               self[(1, 0)],
-               self[(1, 1)],
-               self[(1, 2)],
-               self[(1, 3)],
-               self[(2, 0)],
-               self[(2, 1)],
-               self[(2, 2)],
-               self[(2, 3)],
-        )
-    }
-}
-
-impl Index<(usize, usize)> for Torsion {
-    type Output = f64;
-
-    fn index(&self, index: (usize, usize)) -> &Self::Output {
-        &self.0[4 * index.0 + index.1]
-    }
-}
-
-impl IndexMut<(usize, usize)> for Torsion {
-    fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
-        &mut self.0[4 * index.0 + index.1]
-    }
-}
-
-#[derive(Debug)]
-pub struct Problem {
-    node_count: usize,
-    edge_count: usize,
-    node_capacity: usize,
-    edges: Vec<Vec<usize>>,
-    dists: Vec<f64>,
-    torsions: Vec<(Torsion, Torsion)>,
-}
-
-impl Problem {
-    fn from_file(file: &str) -> Self {
-        let mut data = Vec::<(usize, usize, f64)>::with_capacity(1000);
-
-        let file = File::open(file).unwrap_or_else(|_| panic!("file: {}", file));
-        let mut reader = BufReader::new(file);
-        let mut line = String::with_capacity(200);
-
-        let mut node_count = 0usize;
-        let mut edge_count = 0usize;
-
-        // Find the largest node and the edge count
-        while reader.read_line(&mut line).unwrap() > 0 {
-            edge_count += 1;
-
-            let mut line_split = line.split_whitespace();
-
-            let mut node0 = line_split.next().unwrap().parse::<usize>().unwrap();
-            let mut node1 = line_split.next().unwrap().parse::<usize>().unwrap();
-            let dist = line_split.next().unwrap().parse::<f64>().unwrap();
-
-            if node0 > node1 {
-                swap(&mut node0, &mut node1);
-            }
-
-            if node1 > node_count {
-                node_count = node1;
-            }
-
-            data.push((node0, node1, dist));
-
-            line.clear();
-        }
-
-        let node_capacity = node_count + 1;
-
-        let mut res = Self {
-            node_count,
-            edge_count,
-            node_capacity,
-            edges: vec![Vec::<usize>::with_capacity(20); node_capacity],
-            dists: vec![0f64; node_capacity * node_capacity],
-            torsions: Vec::<(Torsion, Torsion)>::with_capacity(node_capacity),
-        };
-
-        // Populate the data dict
-        for (node0, node1, dist) in data {
-            res.edges[node1].push(node0);
-            res.set_dist(node0, node1, dist);
-        }
-
-        res.compute_torsions();
-
-        res
-    }
-
-    fn get_dist(&self, index0: usize, index1: usize) -> f64 {
-        let dist = self.dists[index0 * self.node_capacity + index1];
-
-        if cfg!(debug_assertions) && dist.abs() < 1e-10 {
-            panic!("dist between {} and {} is too close to zero", index0, index1);
-        }
-
-        dist
-    }
-
-    fn set_dist(&mut self, index0: usize, index1: usize, dist: f64) {
-        self.dists[index0 * self.node_capacity + index1] = dist;
-    }
-
-    fn get_torsion(&self, index: usize) -> &(Torsion, Torsion) {
-        &self.torsions[index]
-    }
-
-    fn compute_torsions(&mut self) {
-        self.torsions.push((Torsion::default(), Torsion::default()));
-        self.torsions.push((Torsion::eye(), Torsion::eye()));
-
-        let mut t2 = Torsion::default();
-        t2[(0, 0)] = -1f64;
-        t2[(0, 3)] = -self.get_dist(1, 2);
-        t2[(1, 1)] = 1f64;
-        t2[(2, 2)] = -1f64;
-        self.torsions.push((t2.clone(), t2));
-
-        let mut t3 = Torsion::default();
-
-        let (sin_theta_3, cos_theta_3) = self.trig_theta_functions(3);
-
-        t3[(0, 0)] = -cos_theta_3;
-        t3[(0, 1)] = -sin_theta_3;
-        t3[(0, 3)] = -self.get_dist(2, 3) * cos_theta_3;
-        t3[(1, 0)] = sin_theta_3;
-        t3[(1, 1)] = -cos_theta_3;
-        t3[(1, 3)] = self.get_dist(2, 3) * sin_theta_3;
-        t3[(2, 2)] = 1f64;
-        self.torsions.push((t3.clone(), t3));
-
-        for node in 4..self.node_capacity {
-            let torsion_pair = self.compute_torsion(node);
-            self.torsions.push(torsion_pair);
-        }
-    }
-
-    fn sin_from_cos(v: f64) -> f64 {
-        (1f64 - v * v).sqrt()
-    }
-
-    // Returns the sin(theta), cos(theta) of the node.
-    fn trig_theta_functions(&self, node: usize) -> (f64, f64) {
-        let d_ab = self.get_dist(node - 2, node - 1);
-        let d_bi = self.get_dist(node - 2, node);
-        let d_ai = self.get_dist(node - 1, node);
-
-        // Theta
-        let mut cos_theta = d_ab * d_ab + d_ai * d_ai - d_bi * d_bi;
-        cos_theta /= 2f64 * d_ab * d_ai;
-
-        // Result
-        (Self::sin_from_cos(cos_theta), cos_theta)
-    }
-
-    // Returns the sin(theta), cos(theta), sin(omega) and cos(omega) of the node.
-    #[allow(clippy::many_single_char_names)]
-    fn trig_functions(&self, node: usize) -> (f64, f64, f64, f64) {
-        let d_cb = self.get_dist(node - 3, node - 2);
-        let d_ca = self.get_dist(node - 3, node - 1);
-        let d_ci = self.get_dist(node - 3, node);
-
-        let d_ab = self.get_dist(node - 2, node - 1);
-        let d_bi = self.get_dist(node - 2, node);
-
-        let d_ai = self.get_dist(node - 1, node);
-
-        let d_ab_squared = d_ab * d_ab;
-        let d_ai_squared = d_ai * d_ai;
-        let d_bi_squared = d_bi * d_bi;
-        let d_ca_squared = d_ca * d_ca;
-        let d_cb_squared = d_cb * d_cb;
-        let d_ci_squared = d_ci * d_ci;
-
-        // Theta
-        let mut cos_theta = d_ab_squared + d_ai_squared - d_bi_squared;
-        cos_theta /= 2f64 * d_ab * d_ai;
-
-        // Omega
-        let a = 2f64 * d_ab_squared * (d_cb_squared + d_bi_squared - d_ci_squared);
-        let b = d_cb_squared + d_ab_squared - d_ca_squared;
-        let c = d_ab_squared + d_bi_squared - d_ai_squared;
-
-        let d = 4f64 * d_cb_squared * d_ab_squared - b * b;
-        let e = 4f64 * d_ab_squared * d_bi_squared - c * c;
-
-        let cos_omega = (a - b * c) / (d * e).sqrt();
-
-        // Result
-        (Self::sin_from_cos(cos_theta), cos_theta, Self::sin_from_cos(cos_omega), cos_omega)
-    }
-
-    fn compute_torsion(&self, node: usize) -> (Torsion, Torsion) {
-        let ri = self.get_dist(node - 1, node);
-        let (sin_ti, cos_ti, sin_oi, cos_oi) = self.trig_functions(node);
-
-        let mut res = Torsion::default();
-
-        res[(0, 0)] = -cos_ti;
-        res[(0, 1)] = -sin_ti;
-        res[(0, 3)] = -ri * cos_ti;
-
-        res[(1, 0)] = sin_ti * cos_oi;
-        res[(1, 1)] = -cos_ti * cos_oi;
-        res[(1, 2)] = -sin_oi;
-        res[(1, 3)] = ri * sin_ti * cos_oi;
-
-        res[(2, 0)] = sin_ti * sin_oi;
-        res[(2, 1)] = -cos_ti * sin_oi;
-        res[(2, 2)] = cos_oi;
-        res[(2, 3)] = ri * sin_ti * sin_oi;
-
-        let mut res_neg = res.clone();
-        res_neg[(1, 2)] *= -1f64;
-        res_neg[(2, 0)] *= -1f64;
-        res_neg[(2, 1)] *= -1f64;
-        res_neg[(2, 3)] *= -1f64;
-
-        (res_neg, res)
-    }
-}
-
-fn compute_position_and_error(problem: &Problem, node: usize, positions: &RangePos, torsion: &Torsion, sign: bool) -> ((f64, f64, f64), Torsion, f64) {
+fn compute_position_and_error(problem: &Problem, node: usize, positions: &VecPos, torsion: &Torsion, sign: bool) -> (Pos, Torsion, f64) {
     let next_torsion = problem.get_torsion(node);
     let next_torsion = if sign { &next_torsion.1 } else { &next_torsion.0 };
 
@@ -292,7 +27,7 @@ fn compute_position_and_error(problem: &Problem, node: usize, positions: &RangeP
         let err = err.0 * err.0 + err.1 * err.1 + err.2 * err.2;
         let err = err.sqrt() - dist;
 
-        total_err += err.abs();
+        total_err += err.abs() / dist;
     }
 
     (pos, cumulative_torsion, total_err)
@@ -304,44 +39,53 @@ fn step(problem: &Problem,
         torsion: &Torsion,
         sign: bool,
         parent_error: f64,
-        mut error_so_far: f64) -> (f64, (f64, f64, f64)) {
-    let (pos, cumulative_torsion, total_err) = compute_position_and_error(problem, node, positions, torsion, sign);
+        mut error_so_far: f64) -> f64 {
+    let (pos, cumulative_torsion, error) = compute_position_and_error(problem, node, positions, torsion, sign);
+    let cumulative_error = parent_error + error;
 
     // End the recursion if the error is bigger than the error so far
-    if parent_error + total_err >= error_so_far {
-        return (parent_error + total_err, pos);
+    if cumulative_error >= error_so_far {
+        return cumulative_error;
     }
 
+    let mut pos_to_revert = positions[node];
     positions[node] = pos;
 
     // End the recursion if it's the last node
     if node >= problem.node_count {
-        return (parent_error + total_err, pos);
+        return cumulative_error;
     }
 
     // Start recursion
-    let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, true, parent_error + total_err, error_so_far);
+    let err_child = step(problem, node + 1, positions, &cumulative_torsion, true, cumulative_error, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
-        positions[node + 1] = pos_child;
+        pos_to_revert = pos;
     }
 
-    let (err_child, pos_child) = step(problem, node + 1, positions, &cumulative_torsion, false, parent_error + total_err, error_so_far);
+    let err_child = step(problem, node + 1, positions, &cumulative_torsion, false, cumulative_error, error_so_far);
     if err_child < error_so_far {
         error_so_far = err_child;
-        positions[node + 1] = pos_child;
+        pos_to_revert = pos;
     }
 
-    (error_so_far, pos)
+    positions[node] = pos_to_revert;
+
+    error_so_far
 }
 
-pub fn load_problem(problem: &'static str) -> Problem {
-    let problem = "/home/caio/molecular/src/data_rem/".to_owned() + problem;
+pub fn load_problem_test(problem: &str) -> Problem {
+    let problem = "/home/caio/molecular/src/instances/".to_owned() + problem + ".nmr";
+    Problem::from_file(&problem)
+}
+
+pub fn load_problem(problem: &str) -> Problem {
+    let problem = "/home/caio/molecular/src/instances/".to_owned() + problem + ".nmr";
     Problem::from_file(&problem)
 }
 
 pub fn solve_first_three(problem: &Problem) -> (Torsion, VecPos) {
-    let mut positions = vec![(0f64, 0f64, 0f64); problem.node_capacity];
+    let mut positions = VecPos::with_size(problem.node_capacity);
 
     // Position 2 (position 1 is all zeros)
     let r2 = problem.get_dist(1, 2);
@@ -360,83 +104,602 @@ pub fn solve_first_three(problem: &Problem) -> (Torsion, VecPos) {
 
 pub fn solve(problem: &Problem, expected_error: f64) -> (f64, VecPos) {
     let (cumulative_torsion_3, mut positions) = solve_first_three(problem);
-    let (err, _) = step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, expected_error);
-    (err, positions)
+    let total_error = step(problem, 4, &mut positions, &cumulative_torsion_3, true, 0f64, expected_error);
+    (total_error, positions)
 }
 
 pub fn solve_default_error(problem: &Problem) -> (f64, VecPos) {
     solve(problem, 1e-7 * problem.edge_count as f64)
 }
 
-pub fn heuristics_greedy(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
+fn calculate_random_guess(problem: &Problem, node: usize, positions: &VecPos, cumulative_torsion: &Torsion,  random: &mut StdRng) -> (Pos, f64, Torsion, bool) {
+    let guess = random.gen_bool(0.5);
+    let (pos, cumulative_torsion, err) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, guess);
+    (pos, err, cumulative_torsion, guess)
+}
+
+fn calculate_best_guess(problem: &Problem, node: usize, positions: &VecPos, cumulative_torsion: &Torsion) -> (Pos, f64, Torsion, bool) {
+    let (pos_true, cumulative_torsion_true, err_true) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, true);
+    let (pos_false, cumulative_torsion_false, err_false) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, false);
+
+    if err_true <= err_false {
+        (pos_true, err_true, cumulative_torsion_true, true)
+    } else {
+        (pos_false, err_false, cumulative_torsion_false, false)
+    }
+}
+
+fn calculate_worst_guess(problem: &Problem, node: usize, positions: &VecPos, cumulative_torsion: &Torsion) -> (Pos, f64, Torsion, bool) {
+    let (pos_true, cumulative_torsion_true, err_true) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, true);
+    let (pos_false, cumulative_torsion_false, err_false) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, false);
+
+    if err_true > err_false {
+        (pos_true, err_true, cumulative_torsion_true, true)
+    } else {
+        (pos_false, err_false, cumulative_torsion_false, false)
+    }
+}
+
+pub fn random_solution(problem: &Problem, random: &mut StdRng) -> (f64, Vec<bool>, VecPos, Vec<Torsion>, Vec<f64>) {
     let (mut cumulative_torsion, mut positions) = solve_first_three(problem);
     let mut solution = vec![true; problem.node_capacity];
+    let mut errors = vec![0.0; problem.node_capacity];
+
+    let mut torsions = Vec::<Torsion>::with_capacity(problem.node_capacity);
+    for node in 0..3 {
+        torsions.push(problem.get_torsion(node).0.clone());
+    }
+    torsions.push(cumulative_torsion.clone());
 
     let mut total_err = 0f64;
 
     for node in 4..problem.node_capacity {
-        let (pos_true, cumulative_torsion_true, err_true) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, true);
+        let (pos_best, err_best, cumulative_torsion_guess, sol_best) =
+            calculate_random_guess(problem, node, &positions, &cumulative_torsion, random);
 
-        // If the error is acceptable, no need to calculate the other.
-        // This will usually happen when there's no extra information about the edges and the error will be zero.
-        // Tn that case, calculating the alternative will also result in zero.
-        if err_true < 1e-20 {
-            cumulative_torsion = cumulative_torsion_true;
-            total_err += err_true;
-            positions[node] = pos_true;
-            solution[node] = true;
-            continue;
-        }
-
-        let (pos_false, cumulative_torsion_false, err_false) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, false);
-
-        let (pos_best, err_best, sol_best) =
-            if err_true <= err_false {
-                cumulative_torsion = cumulative_torsion_true;
-                (pos_true, err_true, true)
-            } else {
-                cumulative_torsion = cumulative_torsion_false;
-                (pos_false, err_false, false)
-            };
-
+        cumulative_torsion = cumulative_torsion_guess;
+        torsions.push(cumulative_torsion.clone());
+        errors[node] = err_best;
         total_err += err_best;
         positions[node] = pos_best;
         solution[node] = sol_best;
     }
 
-    (total_err, solution, positions)
+    (total_err, solution, positions, torsions, errors)
 }
 
-pub fn heuristic_local_search(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
-    let (best_err, solution, positions) = heuristics_greedy(problem);
+pub fn heuristics_greedy_look_one(problem: &Problem) -> (f64, Vec<bool>, VecPos, Vec<Torsion>, Vec<f64>) {
+    let (mut cumulative_torsion, mut positions) = solve_first_three(problem);
+    let mut solution = vec![true; problem.node_capacity];
+    let mut errors = vec![0.0; problem.node_capacity];
 
-    //for node in (5..problem.node_capacity).rev() {}
+    let mut torsions = Vec::<Torsion>::with_capacity(problem.node_capacity);
+    for node in 0..3 {
+        torsions.push(problem.get_torsion(node).0.clone());
+    }
+    torsions.push(cumulative_torsion.clone());
+
+    let mut total_err = 0f64;
+
+    for node in 4..problem.node_capacity {
+        let (pos_best, err_best, cumulative_torsion_guess, sol_best) =
+            calculate_best_guess(problem, node, &positions, &cumulative_torsion);
+
+        cumulative_torsion = cumulative_torsion_guess;
+        torsions.push(cumulative_torsion.clone());
+        errors[node] = err_best;
+        total_err += err_best;
+        positions[node] = pos_best;
+        solution[node] = sol_best;
+    }
+
+    (total_err, solution, positions, torsions, errors)
+}
+
+pub fn heuristics_greedy_look_worst_one(problem: &Problem) -> (f64, Vec<bool>, VecPos, Vec<Torsion>, Vec<f64>) {
+    let (mut cumulative_torsion, mut positions) = solve_first_three(problem);
+    let mut solution = vec![true; problem.node_capacity];
+    let mut errors = vec![0.0; problem.node_capacity];
+
+    let mut torsions = Vec::<Torsion>::with_capacity(problem.node_capacity);
+    for node in 0..3 {
+        torsions.push(problem.get_torsion(node).0.clone());
+    }
+    torsions.push(cumulative_torsion.clone());
+
+    let mut total_err = 0f64;
+
+    for node in 4..problem.node_capacity {
+        let (pos_best, err_best, cumulative_torsion_guess, sol_best) =
+            calculate_worst_guess(problem, node, &positions, &cumulative_torsion);
+
+        cumulative_torsion = cumulative_torsion_guess;
+        torsions.push(cumulative_torsion.clone());
+        errors[node] = err_best;
+        total_err += err_best;
+        positions[node] = pos_best;
+        solution[node] = sol_best;
+    }
+
+    (total_err, solution, positions, torsions, errors)
+}
+
+pub fn heuristics_greedy_look_one_backup(problem: &Problem) -> (f64, Vec<bool>, VecPos, Vec<Torsion>, Vec<f64>) {
+    let (mut cumulative_torsion, mut positions) = solve_first_three(problem);
+    let mut solution = vec![true; problem.node_capacity];
+    let mut errors = vec![0.0; problem.node_capacity];
+
+    let mut torsions = Vec::<Torsion>::with_capacity(problem.node_capacity);
+    for node in 0..3 {
+        torsions.push(problem.get_torsion(node).0.clone());
+    }
+    torsions.push(cumulative_torsion.clone());
+
+    let mut total_err = 0f64;
+
+    for node in 4..problem.node_capacity {
+        let (pos_best, err_best, cumulative_torsion_guess, sol_best) =
+            calculate_best_guess(problem, node, &positions, &cumulative_torsion);
+
+        cumulative_torsion = cumulative_torsion_guess;
+        torsions.push(cumulative_torsion.clone());
+        errors[node] = err_best;
+        total_err += err_best;
+        positions[node] = pos_best;
+        solution[node] = sol_best;
+    }
+
+    (total_err, solution, positions, torsions, errors)
+}
+
+pub fn heuristics_greedy_look_two(problem: &Problem) -> (f64, Vec<bool>, VecPos, Vec<Torsion>, Vec<f64>) {
+    let (mut cumulative_torsion, mut positions) = solve_first_three(problem);
+    let mut solution = vec![true; problem.node_capacity];
+    let mut errors = vec![0.0; problem.node_capacity];
+
+    let mut torsions = Vec::<Torsion>::with_capacity(problem.node_capacity);
+    for node in 0..3 {
+        torsions.push(problem.get_torsion(node).0.clone());
+    }
+    torsions.push(cumulative_torsion.clone());
+
+    let mut total_err = 0f64;
+
+    for node in (4..problem.node_capacity - 1).step_by(2) {
+        let (pos_true, cumulative_torsion_true, err_true) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, true);
+        positions[node] = pos_true;
+        let (pos_true_next, err_true_next, cumulative_torsion_true_next, best_guess_true) =
+            calculate_best_guess(problem, node + 1, &positions, &cumulative_torsion_true);
+
+        let (pos_false, cumulative_torsion_false, err_false) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, false);
+        positions[node] = pos_false;
+        let (pos_false_next, err_false_next, cumulative_torsion_false_next, best_guess_false) =
+            calculate_best_guess(problem, node + 1, &positions, &cumulative_torsion_false);
+
+        let (best_index, _) =
+            [err_true + err_true_next, err_true + err_false_next, err_false + err_true_next, err_false + err_false_next]
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+                .unwrap();
+
+        if best_index == 0 || best_index == 1 {
+            torsions.push(cumulative_torsion_true);
+            errors[node] = err_true;
+            total_err += err_true;
+            positions[node] = pos_true;
+            solution[node] = true;
+        } else {
+            torsions.push(cumulative_torsion_false);
+            errors[node] = err_false;
+            total_err += err_false;
+            positions[node] = pos_false;
+            solution[node] = false;
+        }
+
+        if best_index == 0 || best_index == 2 {
+            cumulative_torsion = cumulative_torsion_true_next;
+            torsions.push(cumulative_torsion.clone());
+            errors[node + 1] = err_true_next;
+            total_err += err_true_next;
+            positions[node + 1] = pos_true_next;
+            solution[node + 1] = best_guess_true;
+        } else {
+            cumulative_torsion = cumulative_torsion_false_next;
+            torsions.push(cumulative_torsion.clone());
+            errors[node + 1] = err_false_next;
+            total_err += err_false_next;
+            positions[node + 1] = pos_false_next;
+            solution[node + 1] = best_guess_false;
+        }
+    }
+
+    if problem.node_capacity % 2 == 0 {
+        let (pos_best, err_best, cumulative_torsion_guess, sol_best) =
+            calculate_best_guess(problem, problem.node_capacity - 1, &positions, &cumulative_torsion);
+
+        cumulative_torsion = cumulative_torsion_guess;
+        torsions.push(cumulative_torsion.clone());
+        errors[problem.node_capacity - 1] = err_best;
+        total_err += err_best;
+        positions[problem.node_capacity - 1] = pos_best;
+        solution[problem.node_capacity - 1] = sol_best;
+    }
+
+    (total_err, solution, positions, torsions, errors)
+}
+
+fn improve_backward(problem: &Problem, mut best_err: f64, solution: &mut Vec<bool>, mut positions: VecPos, torsions: &Vec<Torsion>) -> (f64, VecPos) {
+    loop {
+        let mut has_improved = false;
+
+        for node in (5..problem.node_capacity).rev() {
+            solution[node] = !solution[node];
+
+            let mut positions_new = positions.clone();
+            let mut torsions_new = torsions.clone();
+
+            for node2 in node..problem.node_capacity {
+                let (pos, torsion, _) = compute_position_and_error(problem, node2, &positions_new, &torsions_new[node2 - 1], solution[node2]);
+                positions_new[node2] = pos;
+                torsions_new[node2] = torsion;
+            }
+
+            let new_error = compute_error(problem, &positions_new);
+
+            if new_error >= best_err {
+                solution[node] = !solution[node];
+                continue;
+            }
+
+            positions = positions_new;
+            best_err = new_error;
+            has_improved = true;
+            break;
+        }
+
+        if !has_improved {
+            break;
+        }
+    }
+
+    (best_err, positions)
+}
+
+pub fn heuristic_local_search_backward(problem: &Problem) -> (f64, Vec<bool>, VecPos, Vec<Torsion>) {
+    let (best_err, mut solution, positions, torsions, _) = heuristics_greedy_look_one(problem);
+    let (best_err, positions) = improve_backward(problem, best_err, &mut solution, positions, &torsions);
+    (best_err, solution, positions, torsions)
+}
+
+pub fn heuristic_local_search_forward(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
+    let (mut best_err, mut solution, mut positions, torsions, _) = heuristics_greedy_look_one(problem);
+
+    loop {
+        let mut has_improved = false;
+
+        for node in 5..problem.node_capacity {
+            solution[node] = !solution[node];
+
+            let mut positions_new = positions.clone();
+            let mut torsions_new = torsions.clone();
+
+            for node2 in node..problem.node_capacity {
+                let (pos, torsion, _) = compute_position_and_error(problem, node2, &positions_new, &torsions_new[node2 - 1], solution[node2]);
+                positions_new[node2] = pos;
+                torsions_new[node2] = torsion;
+            }
+
+            let new_error = compute_error(problem, &positions_new);
+
+            if new_error >= best_err {
+                solution[node] = !solution[node];
+                continue;
+            }
+
+            positions = positions_new;
+            best_err = new_error;
+            has_improved = true;
+            break;
+        }
+
+        if !has_improved {
+            break;
+        }
+    }
 
     (best_err, solution, positions)
 }
 
-pub fn solve_heuristic_error(problem: &Problem) -> (f64, VecPos) {
-    let (err, _, _) = heuristic_local_search(problem);
-    solve(problem, err)
+pub fn heuristic_local_search_best(problem: &Problem) -> (f64, Vec<bool>, VecPos) {
+    let (mut best_err, mut solution, mut positions, torsions, _) = heuristics_greedy_look_one(problem);
+
+    loop {
+        let mut found_so_far = None;
+        let mut error_so_far = best_err;
+
+        for node in 5..problem.node_capacity {
+            solution[node] = !solution[node];
+
+            let mut positions_new = positions.clone();
+            let mut torsions_new = torsions.clone();
+
+            for node2 in node..problem.node_capacity {
+                let (pos, torsion, _) = compute_position_and_error(problem, node2, &positions_new, &torsions_new[node2 - 1], solution[node2]);
+                positions_new[node2] = pos;
+                torsions_new[node2] = torsion;
+            }
+
+            let new_error = compute_error(problem, &positions_new);
+
+            solution[node] = !solution[node];
+
+            if new_error < error_so_far {
+                found_so_far = Some(node);
+                error_so_far = new_error;
+            }
+        }
+
+        match found_so_far {
+            None => { return (best_err, solution, positions); }
+            Some(node) => {
+                best_err = error_so_far;
+                solution[node] = !solution[node];
+
+                for node2 in node..problem.node_capacity {
+                    let (pos, _, _) = compute_position_and_error(problem, node2, &positions, &torsions[node2 - 1], solution[node2]);
+                    positions[node2] = pos;
+                }
+            }
+        }
+    }
 }
 
-pub fn format(problem: &Problem, positions: &RangePos) -> String {
+pub fn heuristic_iterated_local_search(problem: &Problem, chance_perturbation: u32, iterations: usize, rng_seed: u64) -> (f64, Vec<bool>, VecPos, Vec<f64>) {
+    let (_, mut solution, mut positions, mut torsions) = heuristic_local_search_backward(&problem);
+    let mut random = StdRng::seed_from_u64(rng_seed);
+
+    let mut errors = Vec::<f64>::with_capacity(iterations);
+
+    let mut best_err = compute_error(problem, &positions);
+    errors.push(best_err);
+
+    for _ in 1..iterations {
+        let mut solution_candidate = solution.clone();
+        let mut positions_candidate = positions.clone();
+
+        let mut cumulative_torsion = torsions[4].clone();
+
+        for node2 in 5..problem.node_capacity {
+            if random.gen_ratio(chance_perturbation, 100) {
+                solution_candidate[node2] = !solution_candidate[node2];
+            }
+
+            let (pos, cumulative_torsion_new, _) = compute_position_and_error(problem, node2, &positions_candidate, &cumulative_torsion, solution_candidate[node2]);
+            positions_candidate[node2] = pos;
+            torsions[node2] = cumulative_torsion_new.clone();
+            cumulative_torsion = cumulative_torsion_new;
+        }
+
+        let (_, positions_candidate) = improve_backward(problem, best_err, &mut solution_candidate, positions_candidate, &torsions);
+
+        let err_candidate = compute_error(problem, &positions_candidate);
+
+        if err_candidate < best_err {
+            best_err = err_candidate;
+            solution = solution_candidate;
+            positions = positions_candidate;
+        }
+
+        errors.push(best_err);
+    }
+
+    (best_err, solution, positions, errors)
+}
+
+
+pub fn heuristic_iterated_local_search2(problem: &Problem, chance_perturbation: u32, iterations: usize, rng_seed: u64) -> (f64, Vec<bool>, VecPos, Vec<f64>) {
+    let mut random = StdRng::seed_from_u64(rng_seed);
+
+    let (_, mut solution, mut positions, mut torsions, _) = random_solution(problem, &mut random);
+
+    let mut errors = Vec::<f64>::with_capacity(iterations);
+
+    let mut best_err = compute_error(problem, &positions);
+    errors.push(best_err);
+
+    for _ in 1..iterations {
+        let mut solution_candidate = solution.clone();
+        let mut positions_candidate = positions.clone();
+
+        let mut cumulative_torsion = torsions[4].clone();
+
+        for node2 in 5..problem.node_capacity {
+            if random.gen_ratio(chance_perturbation, 100) {
+                solution_candidate[node2] = !solution_candidate[node2];
+            }
+
+            let (pos, cumulative_torsion_new, _) = compute_position_and_error(problem, node2, &positions_candidate, &cumulative_torsion, solution_candidate[node2]);
+            positions_candidate[node2] = pos;
+            torsions[node2] = cumulative_torsion_new.clone();
+            cumulative_torsion = cumulative_torsion_new;
+        }
+
+        let (_, positions_candidate) = improve_backward(problem, best_err, &mut solution_candidate, positions_candidate, &torsions);
+
+        let err_candidate = compute_error(problem, &positions_candidate);
+
+        if err_candidate < best_err {
+            best_err = err_candidate;
+            solution = solution_candidate;
+            positions = positions_candidate;
+        }
+
+        errors.push(best_err);
+    }
+
+    (best_err, solution, positions, errors)
+}
+
+pub fn format(problem: &Problem, positions: &VecPos) -> String {
     let mut res = Vec::<String>::with_capacity(problem.node_capacity);
-    for (node, position) in positions.iter().enumerate().skip(1) {
+    for (node, position) in positions.0.iter().enumerate().skip(1) {
         res.push(format!("{} {:.9} {:.9} {:.9}", node, position.0, position.1, position.2));
     }
     res.join("\n")
 }
 
-pub fn load_solve_and_format(problem: &'static str) -> String {
+pub fn solve_greedy_one(problem: &str) -> (f64, String) {
     let problem = load_problem(problem);
-    let (err, positions) = solve_default_error(&problem);
-    println!("error={:e}", err / problem.edge_count as f64);
-    format(&problem, &positions)
+    let (error, _, positions, _, _) = heuristics_greedy_look_one(&problem);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_greedy_two(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, _, positions, _, _) = heuristics_greedy_look_two(&problem);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_greedy_worst_one(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, _, positions, _, _) = heuristics_greedy_look_worst_one(&problem);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_exact(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, positions) = solve_default_error(&problem);
+
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_exact_with_greedy_error(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error_candidate, _, _, _, _) = heuristics_greedy_look_one(&problem);
+    let (error, positions) = solve(&problem, error_candidate);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_local_search_forward(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, _, positions) = heuristic_local_search_forward(&problem);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+pub fn solve_local_search_backward(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, _, positions, _) = heuristic_local_search_backward(&problem);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
+#[allow(dead_code)]
+fn compute_error(problem: &Problem, positions: &VecPos) -> f64 {
+    let mut total_error = 0f64;
+
+    for &(node0, node1, dist) in &problem.data {
+        let pos0 = positions[node0];
+        let pos1 = positions[node1];
+
+        let diff = (pos0.0 - pos1.0, pos0.1 - pos1.1, pos0.2 - pos1.2);
+        let diff = diff.0 * diff.0 + diff.1 * diff.1 + diff.2 * diff.2;
+        let diff = diff.sqrt();
+
+        total_error += (diff - dist).abs() / dist;
+    }
+
+    total_error
 }
 
 #[allow(dead_code)]
 fn main() {
-    let actual = load_solve_and_format("1fs3.nmr");
-    println!("{}", actual);
+    let instances = ["1ppt", "2erl", "1crn", "1jk2", "1pht", "1a70", "1fs3", "1hoe", "1poa", "1mbn", "1ptq", "1m40", "1n4w", "1mqq", "1bpm", "3b34", "2e7z", "1rwh", "1rgs"];
+
+    println!("inst || exact        || greedy_one   | greedy_two   | greedy_worst || local_front  | local_back   | local_best   || ils 5%       | ils 10%      | ils 20%      | ils 30%      | ils 40%      | ils 50%      ");
+
+    let mut rng_seed = 666u64;
+    let iterations = 5;
+
+    for file in instances.iter().copied() {
+        let problem = load_problem(file);
+
+        let (_, positions_exact) = solve_default_error(&problem);
+
+        let (_, _, positions_greedy_one, _, _) = heuristics_greedy_look_one(&problem);
+        let (_, _, positions_greedy_two, _, _) = heuristics_greedy_look_two(&problem);
+        let (_, _, positions_greedy_worst, _, _) = heuristics_greedy_look_worst_one(&problem);
+
+        let (_, _, positions_local_forward) = heuristic_local_search_forward(&problem);
+        let (_, _, positions_local_backward, _) = heuristic_local_search_backward(&problem);
+        let (_, _, positions_local_best) = heuristic_local_search_best(&problem);
+
+        let (_, _, positions_iterated_5, _) = heuristic_iterated_local_search(&problem, 5, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_10, _) = heuristic_iterated_local_search(&problem, 10, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_20, _) = heuristic_iterated_local_search(&problem, 20, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_30, _) = heuristic_iterated_local_search(&problem, 30, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_40, _) = heuristic_iterated_local_search(&problem, 40, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_50, _) = heuristic_iterated_local_search(&problem, 50, iterations, rng_seed);
+        rng_seed += 1;
+
+        let (_, _, positions_iterated_75, _) = heuristic_iterated_local_search(&problem, 75, iterations, rng_seed);
+        rng_seed += 1;
+
+        println!("{} || {:<12.5e} || {:<12.5e} | {:<12.5e} | {:<12.5e} || {:<12.5e} | {:<12.5e} | {:<12.5e} || {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e}",
+                 file,
+                 // Exact
+                 compute_error(&problem, &positions_exact),
+                 // Greedy
+                 compute_error(&problem, &positions_greedy_one),
+                 compute_error(&problem, &positions_greedy_two),
+                 compute_error(&problem, &positions_greedy_worst),
+                 // Local search
+                 compute_error(&problem, &positions_local_forward),
+                 compute_error(&problem, &positions_local_backward),
+                 compute_error(&problem, &positions_local_best),
+                 // Iterated local search
+                 compute_error(&problem, &positions_iterated_5),
+                 compute_error(&problem, &positions_iterated_10),
+                 compute_error(&problem, &positions_iterated_20),
+                 compute_error(&problem, &positions_iterated_30),
+                 compute_error(&problem, &positions_iterated_40),
+                 compute_error(&problem, &positions_iterated_50),
+                 compute_error(&problem, &positions_iterated_75),
+        );
+    }
+
+    println!("\n1ptq || 5%           | 10%          | 20%          | 30%          | 40%          | 50%           ");
+
+    let problem = load_problem("1ptq");
+    let ils_seed = 0;
+
+    let (_, _, _, errors_iterated_5) = heuristic_iterated_local_search2(&problem, 5, 1000, ils_seed);
+    let (_, _, _, errors_iterated_10) = heuristic_iterated_local_search2(&problem, 10, 1000, ils_seed + 1);
+    let (_, _, _, errors_iterated_20) = heuristic_iterated_local_search2(&problem, 20, 1000, ils_seed + 2);
+    let (_, _, _, errors_iterated_30) = heuristic_iterated_local_search2(&problem, 30, 1000, ils_seed + 3);
+    let (_, _, _, errors_iterated_40) = heuristic_iterated_local_search2(&problem, 40, 1000, ils_seed + 4);
+    let (_, _, _, errors_iterated_50) = heuristic_iterated_local_search2(&problem, 50, 1000, ils_seed + 5);
+    let (_, _, _, errors_iterated_75) = heuristic_iterated_local_search2(&problem, 75, 1000, ils_seed + 6);
+
+    for i in 0..1000 {
+        println!("{:<5} || {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e}",
+                 i,
+                 errors_iterated_5[i],
+                 errors_iterated_10[i],
+                 errors_iterated_20[i],
+                 errors_iterated_30[i],
+                 errors_iterated_40[i],
+                 errors_iterated_50[i],
+                 errors_iterated_75[i],
+        );
+    }
 }

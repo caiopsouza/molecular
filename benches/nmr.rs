@@ -1,37 +1,45 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("1ppt.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("1ppt.nmr"));
-    }));
+    let instances = ["1ppt", "2erl", "1crn", "1jk2", "1pht", "1a70", "1fs3", "1hoe", "1poa", "1mbn", "1ptq", "1m40", "1n4w", "1mqq", "1bpm", "3b34", "2e7z", "1rwh", "1rgs"];
 
-    c.bench_function("2erl.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("2erl.nmr"));
-    }));
+    let mut group = c.benchmark_group("molecular");
+    group.sample_size(100);
 
-    c.bench_function("1fs3.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("1fs3.nmr"));
-    }));
+    // Exact
+    /*for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("exact", file), file,
+                               |b, file| b.iter(|| molecular::solve_exact(file)));
+    }*/
 
-    c.bench_function("1mqq.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("1mqq.nmr"));
-    }));
+    // Heuristics: Greedy
+    for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("greedy_one", file), file,
+                               |b, file| b.iter(|| molecular::solve_greedy_one(file)));
+    }
 
-    c.bench_function("1m40.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("1m40.nmr"));
-    }));
+    for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("greedy_two", file), file,
+                               |b, file| b.iter(|| molecular::solve_greedy_two(file)));
+    }
 
-    c.bench_function("1rwh.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("1rwh.nmr"));
-    }));
+    for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("greedy_worst_one", file), file,
+                               |b, file| b.iter(|| molecular::solve_greedy_worst_one(file)));
+    }
 
-    c.bench_function("3b34.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("3b34.nmr"));
-    }));
+    // Heuristics: Local Search
+    /*for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("local_forward", file), file,
+                               |b, file| b.iter(|| molecular::solve_local_search_forward(file)));
+    }
 
-    c.bench_function("2e7z.nmr", |b| b.iter(|| {
-        molecular::load_solve_and_format(black_box("2e7z.nmr"));
-    }));
+    for file in instances.iter() {
+        group.bench_with_input(BenchmarkId::new("local_backward", file), file,
+                               |b, file| b.iter(|| molecular::solve_local_search_backward(file)));
+    }*/
+
+    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
