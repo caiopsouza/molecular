@@ -112,7 +112,7 @@ pub fn solve_default_error(problem: &Problem) -> (f64, VecPos) {
     solve(problem, 1e-7 * problem.edge_count as f64)
 }
 
-fn calculate_random_guess(problem: &Problem, node: usize, positions: &VecPos, cumulative_torsion: &Torsion,  random: &mut StdRng) -> (Pos, f64, Torsion, bool) {
+fn calculate_random_guess(problem: &Problem, node: usize, positions: &VecPos, cumulative_torsion: &Torsion, random: &mut StdRng) -> (Pos, f64, Torsion, bool) {
     let guess = random.gen_bool(0.5);
     let (pos, cumulative_torsion, err) = compute_position_and_error(problem, node, &positions, &cumulative_torsion, guess);
     (pos, err, cumulative_torsion, guess)
@@ -502,23 +502,40 @@ pub fn heuristic_iterated_local_search2(problem: &Problem, chance_perturbation: 
     let mut random = StdRng::seed_from_u64(rng_seed);
 
     let (_, mut solution, mut positions, mut torsions, _) = random_solution(problem, &mut random);
+    //let (_, mut solution, mut positions, mut torsions) = heuristic_local_search_backward(&problem);
 
     let mut errors = Vec::<f64>::with_capacity(iterations);
 
     let mut best_err = compute_error(problem, &positions);
     errors.push(best_err);
 
+    let mut iterations_without_improvement = 0;
+
+    let mut being_tested_err = best_err;
+    let mut being_tested_solution = solution.clone();
+    let mut being_tested_positions = positions.clone();
+
     for _ in 1..iterations {
-        let mut solution_candidate = solution.clone();
-        let mut positions_candidate = positions.clone();
+        let mut solution_candidate = being_tested_solution.clone();
+        let mut positions_candidate = being_tested_positions.clone();
 
         let mut cumulative_torsion = torsions[4].clone();
 
-        for node2 in 5..problem.node_capacity {
-            if random.gen_ratio(chance_perturbation, 100) {
-                solution_candidate[node2] = !solution_candidate[node2];
+        if iterations_without_improvement >= 4 {
+            being_tested_err = 1000000000000000.0;
+            iterations_without_improvement = 0;
+            for node2 in 5..problem.node_capacity {
+                solution_candidate[node2] = random.gen_ratio(50, 100);
             }
+        } else {
+            for node2 in 5..problem.node_capacity {
+                if random.gen_ratio(chance_perturbation, 100) {
+                    solution_candidate[node2] = !solution_candidate[node2];
+                }
+            }
+        }
 
+        for node2 in 5..problem.node_capacity {
             let (pos, cumulative_torsion_new, _) = compute_position_and_error(problem, node2, &positions_candidate, &cumulative_torsion, solution_candidate[node2]);
             positions_candidate[node2] = pos;
             torsions[node2] = cumulative_torsion_new.clone();
@@ -529,10 +546,19 @@ pub fn heuristic_iterated_local_search2(problem: &Problem, chance_perturbation: 
 
         let err_candidate = compute_error(problem, &positions_candidate);
 
-        if err_candidate < best_err {
-            best_err = err_candidate;
-            solution = solution_candidate;
-            positions = positions_candidate;
+        iterations_without_improvement += 1;
+
+        if err_candidate < being_tested_err {
+            being_tested_err = err_candidate;
+            being_tested_solution = solution_candidate;
+            being_tested_positions = positions_candidate;
+            iterations_without_improvement = 0;
+        }
+
+        if being_tested_err < best_err {
+            best_err = being_tested_err;
+            solution = being_tested_solution.clone();
+            positions = being_tested_positions.clone();
         }
 
         errors.push(best_err);
@@ -593,6 +619,12 @@ pub fn solve_local_search_backward(problem: &str) -> (f64, String) {
     (error / problem.edge_count as f64, format(&problem, &positions))
 }
 
+pub fn solve_iterated_local_search(problem: &str) -> (f64, String) {
+    let problem = load_problem(problem);
+    let (error, _, positions, _) = heuristic_iterated_local_search(&problem, 5, 100, 666);
+    (error / problem.edge_count as f64, format(&problem, &positions))
+}
+
 #[allow(dead_code)]
 fn compute_error(problem: &Problem, positions: &VecPos) -> f64 {
     let mut total_error = 0f64;
@@ -615,10 +647,10 @@ fn compute_error(problem: &Problem, positions: &VecPos) -> f64 {
 fn main() {
     let instances = ["1ppt", "2erl", "1crn", "1jk2", "1pht", "1a70", "1fs3", "1hoe", "1poa", "1mbn", "1ptq", "1m40", "1n4w", "1mqq", "1bpm", "3b34", "2e7z", "1rwh", "1rgs"];
 
-    println!("inst || exact        || greedy_one   | greedy_two   | greedy_worst || local_front  | local_back   | local_best   || ils 5%       | ils 10%      | ils 20%      | ils 30%      | ils 40%      | ils 50%      ");
+    println!("inst || exact        || greedy_one   | greedy_two   | greedy_worst || local_front  | local_back   | local_best   || ils 5%       | ils 10%      | ils 20%      | ils 30%      | ils 40%      | ils 50%      | ils 75%      ");
 
     let mut rng_seed = 666u64;
-    let iterations = 5;
+    let iterations = 100;
 
     for file in instances.iter().copied() {
         let problem = load_problem(file);
@@ -682,13 +714,13 @@ fn main() {
     let problem = load_problem("1ptq");
     let ils_seed = 0;
 
-    let (_, _, _, errors_iterated_5) = heuristic_iterated_local_search2(&problem, 5, 1000, ils_seed);
-    let (_, _, _, errors_iterated_10) = heuristic_iterated_local_search2(&problem, 10, 1000, ils_seed + 1);
-    let (_, _, _, errors_iterated_20) = heuristic_iterated_local_search2(&problem, 20, 1000, ils_seed + 2);
-    let (_, _, _, errors_iterated_30) = heuristic_iterated_local_search2(&problem, 30, 1000, ils_seed + 3);
-    let (_, _, _, errors_iterated_40) = heuristic_iterated_local_search2(&problem, 40, 1000, ils_seed + 4);
-    let (_, _, _, errors_iterated_50) = heuristic_iterated_local_search2(&problem, 50, 1000, ils_seed + 5);
-    let (_, _, _, errors_iterated_75) = heuristic_iterated_local_search2(&problem, 75, 1000, ils_seed + 6);
+    let (_, _, _, errors_iterated_5) = heuristic_iterated_local_search2(&problem, 5,   2000, ils_seed);
+    let (_, _, _, errors_iterated_10) = heuristic_iterated_local_search2(&problem, 10, 2000, ils_seed + 1);
+    let (_, _, _, errors_iterated_20) = heuristic_iterated_local_search2(&problem, 20, 2000, ils_seed + 2);
+    let (_, _, _, errors_iterated_30) = heuristic_iterated_local_search2(&problem, 30, 2000, ils_seed + 3);
+    let (_, _, _, errors_iterated_40) = heuristic_iterated_local_search2(&problem, 40, 2000, ils_seed + 4);
+    let (_, _, _, errors_iterated_50) = heuristic_iterated_local_search2(&problem, 50, 2000, ils_seed + 5);
+    let (_, _, _, errors_iterated_75) = heuristic_iterated_local_search2(&problem, 75, 2000, ils_seed + 6);
 
     for i in 0..1000 {
         println!("{:<5} || {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e} | {:<12.5e}",
